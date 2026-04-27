@@ -1,0 +1,16 @@
+[package]
+name = "rendercv"
+version = "0.3.0"
+entrypoint = "lib.typ"
+license = "MIT"
+description = "Resume builder for academics and engineers"
+keywords = ["rendercv", "cv", "resume", "curriculum-vitae"]
+categories = ["cv"]
+disciplines = []
+compiler = "0.14.0"
+exclude = ["examples/*.pdf"]
+
+[template]
+path = "template"
+entrypoint = "main.typ"
+thumbnail = "thumbnail.png"
