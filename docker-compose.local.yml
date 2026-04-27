@@ -1,0 +1,15 @@
+services:
+  backend:
+    ports:
+      - "8000:8000"
+    environment:
+      RENDERCV_WEB_CORS_ORIGINS: "http://localhost:3000"
+
+  frontend:
+    ports:
+      - "3000:3000"
+    build:
+      args:
+        NEXT_PUBLIC_RENDERCV_API_BASE_URL: "http://localhost:8000"
+    environment:
+      NEXT_PUBLIC_RENDERCV_API_BASE_URL: "http://localhost:8000"

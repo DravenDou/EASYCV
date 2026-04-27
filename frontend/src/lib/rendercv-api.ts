@@ -70,7 +70,7 @@ type ApiErrorPayload = {
   validation_errors?: ValidationIssue[] | null;
 };
 
-const fallbackApiBaseUrl = "http://127.0.0.1:8000";
+const fallbackApiBaseUrl = "/rendercv-api";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;

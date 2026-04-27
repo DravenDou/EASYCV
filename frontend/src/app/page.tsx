@@ -67,7 +67,7 @@ import {
 } from '@/lib/rendercv-api';
 
 const defaultApiBaseUrl =
-  process.env.NEXT_PUBLIC_RENDERCV_API_BASE_URL ?? 'http://127.0.0.1:8000';
+  process.env.NEXT_PUBLIC_RENDERCV_API_BASE_URL ?? '/rendercv-api';
 
 const renderFormats: RenderFormats = {
   include_pdf: true,

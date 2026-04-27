@@ -15,13 +15,13 @@ ENV UV_LINK_MODE=copy
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project --no-editable --extra full --no-default-groups
+    uv sync --frozen --no-install-project --no-editable --extra full --extra web --no-default-groups
 
 # Then, add the rest of the project source code and install it
 # Installing separately from its dependencies allows optimal layer caching
 COPY . /app
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-editable --extra full --no-default-groups
+    uv sync --frozen --no-editable --extra full --extra web --no-default-groups
 
 # Final stage
 FROM python:3.12-slim-bookworm
@@ -41,6 +41,8 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 # Use the non-root user to run our application
 USER rendercv
+
+EXPOSE 8000
 
 # Set the entrypoint to the rendercv CLI (installed via pyproject.toml entry point)
 ENTRYPOINT ["rendercv"]

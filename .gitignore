@@ -57,14 +57,8 @@ skills-lock.json
 frontend/AGENTS.md
 frontend/CLAUDE.md
 
-# Local deployment files (do not publish)
-/.dockerignore
+# Local deployment notes (do not publish)
 /DEPLOY_COOLIFY.md
-/docker-compose.yml
-/docker-compose.local.yml
-/.env.example
-frontend/.dockerignore
-frontend/Dockerfile
 
 # Unit test / coverage reports
 htmlcov/
@@ -154,7 +148,6 @@ celerybeat.pid
 .env
 .env.*
 !.env.example
-/.env.example
 .venv
 .venv*/
 env/

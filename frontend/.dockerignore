@@ -1,0 +1,13 @@
+.git
+.next
+node_modules
+.agents
+.qa
+*.log
+*.stdout.log
+*.stderr.log
+.env
+.env.*
+skills-lock.json
+AGENTS.md
+CLAUDE.md
