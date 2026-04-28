@@ -193,6 +193,7 @@ type EntryTemplate = {
   id: EntryTemplateId;
   label: string;
   sectionTitle: string;
+  description: string;
   icon: LucideIcon;
   buildEntry: () => string;
 };
@@ -268,6 +269,7 @@ const entryTemplates: EntryTemplate[] = [
     id: 'text',
     label: 'Texto',
     sectionTitle: 'Resumen',
+    description: 'Párrafo o viñeta simple para resumen, perfil o introducción.',
     icon: Type,
     buildEntry: () =>
       '      - Resume tu perfil, especialidad y el valor que aportas en 2 o 3 líneas.',
@@ -276,6 +278,7 @@ const entryTemplates: EntryTemplate[] = [
     id: 'experience',
     label: 'Experiencia',
     sectionTitle: 'Experiencia',
+    description: 'Empresa, cargo, fechas, ubicación y logros medibles.',
     icon: BriefcaseBusiness,
     buildEntry: () => `      - company: Empresa
         position: Cargo
@@ -290,6 +293,7 @@ const entryTemplates: EntryTemplate[] = [
     id: 'education',
     label: 'Educación',
     sectionTitle: 'Educación',
+    description: 'Institución, área, título, fechas y detalles académicos.',
     icon: GraduationCap,
     buildEntry: () => `      - institution: Universidad o institución
         area: Área de estudio
@@ -302,8 +306,9 @@ const entryTemplates: EntryTemplate[] = [
   },
   {
     id: 'normal',
-    label: 'Proyecto',
+    label: 'Proyectos',
     sectionTitle: 'Proyectos',
+    description: 'Proyecto, evento, premio o elemento con nombre y logros.',
     icon: BookOpen,
     buildEntry: () => `      - name: Nombre del proyecto
         location: Remoto
@@ -314,8 +319,9 @@ const entryTemplates: EntryTemplate[] = [
   },
   {
     id: 'publication',
-    label: 'Publicación',
+    label: 'Publicaciones',
     sectionTitle: 'Publicaciones',
+    description: 'Título, autores, revista/conferencia, fecha y DOI.',
     icon: FileText,
     buildEntry: () => `      - title: Título de la publicación
         authors:
@@ -327,29 +333,33 @@ const entryTemplates: EntryTemplate[] = [
   },
   {
     id: 'bullet',
-    label: 'Viñeta',
+    label: 'Reconocimientos',
     sectionTitle: 'Reconocimientos',
+    description: 'Premios, certificaciones o reconocimientos breves.',
     icon: Award,
     buildEntry: () => '      - bullet: Premio, certificación o reconocimiento relevante.',
   },
   {
     id: 'numbered',
-    label: 'Numerada',
+    label: 'Logros',
     sectionTitle: 'Logros',
+    description: 'Resultados ordenados por prioridad o secuencia.',
     icon: Hash,
     buildEntry: () => '      - number: Logro o resultado ordenado por prioridad.',
   },
   {
     id: 'reversedNumbered',
-    label: 'Lista inversa',
+    label: 'Charlas',
     sectionTitle: 'Charlas',
+    description: 'Ponencias, charlas o actividades recientes.',
     icon: ListPlus,
     buildEntry: () => '      - reversed_number: Charla, ponencia o actividad reciente.',
   },
   {
     id: 'oneLine',
-    label: 'Una línea',
+    label: 'Habilidades',
     sectionTitle: 'Habilidades',
+    description: 'Categorías con detalles breves en una sola línea.',
     icon: ListPlus,
     buildEntry: () => `      - label: Lenguajes
         details: Python, TypeScript, SQL`,
@@ -545,6 +555,10 @@ function stringifyYamlData(data: unknown): string {
   });
 }
 
+function getTemplateById(templateId: EntryTemplateId): EntryTemplate {
+  return entryTemplates.find((entryTemplate) => entryTemplate.id === templateId) ?? entryTemplates[0];
+}
+
 function parseYamlRecord(yamlText: string): Record<string, unknown> | null {
   try {
     const data: unknown = parse(yamlText);
@@ -562,6 +576,19 @@ function getCvSections(data: Record<string, unknown>): Record<string, unknown> |
 
   const sections = cv.sections;
   return isRecordLike(sections) ? sections : null;
+}
+
+function ensureCvSections(data: Record<string, unknown>): Record<string, unknown> {
+  if (!isRecordLike(data.cv)) {
+    data.cv = {};
+  }
+
+  const cv = data.cv as Record<string, unknown>;
+  if (!isRecordLike(cv.sections)) {
+    cv.sections = {};
+  }
+
+  return cv.sections as Record<string, unknown>;
 }
 
 function isExperienceSectionTitle(title: string): boolean {
@@ -586,6 +613,103 @@ function textToHighlights(value: string): string[] {
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean);
+}
+
+function buildStructuredEntry(template: EntryTemplate): unknown {
+  const normalizedEntryYaml = template
+    .buildEntry()
+    .split('\n')
+    .map((line) => line.replace(/^ {6}/, ''))
+    .join('\n');
+  const parsedEntryBlock = parse(`entries:\n${normalizedEntryYaml.replace(/^/gm, '  ')}`);
+
+  if (isRecordLike(parsedEntryBlock) && Array.isArray(parsedEntryBlock.entries)) {
+    return parsedEntryBlock.entries[0] ?? '';
+  }
+
+  return '';
+}
+
+function inferTemplateIdFromEntry(entry: unknown): EntryTemplateId | null {
+  if (typeof entry === 'string') {
+    return 'text';
+  }
+
+  if (!isRecordLike(entry)) {
+    return null;
+  }
+
+  if ('company' in entry || 'position' in entry) {
+    return 'experience';
+  }
+  if ('institution' in entry || 'degree' in entry || 'area' in entry) {
+    return 'education';
+  }
+  if ('title' in entry || 'authors' in entry || 'doi' in entry) {
+    return 'publication';
+  }
+  if ('bullet' in entry) {
+    return 'bullet';
+  }
+  if ('number' in entry) {
+    return 'numbered';
+  }
+  if ('reversed_number' in entry) {
+    return 'reversedNumbered';
+  }
+  if ('label' in entry || 'details' in entry) {
+    return 'oneLine';
+  }
+  if ('name' in entry) {
+    return 'normal';
+  }
+
+  return null;
+}
+
+function inferSectionTemplateId(sectionValue: unknown): EntryTemplateId | null {
+  if (!Array.isArray(sectionValue)) {
+    return null;
+  }
+
+  for (const entry of sectionValue) {
+    const inferredTemplateId = inferTemplateIdFromEntry(entry);
+    if (inferredTemplateId) {
+      return inferredTemplateId;
+    }
+  }
+
+  return null;
+}
+
+function isSectionCompatibleWithTemplate(sectionValue: unknown, templateId: EntryTemplateId): boolean {
+  if (!Array.isArray(sectionValue) || sectionValue.length === 0) {
+    return true;
+  }
+
+  return inferSectionTemplateId(sectionValue) === templateId;
+}
+
+function resolveEntryDestinationSection(
+  yamlText: string,
+  selectedSection: string,
+  newSectionTitle: string,
+  template: EntryTemplate,
+): string {
+  const customSectionTitle = newSectionTitle.trim();
+  if (customSectionTitle) {
+    return customSectionTitle;
+  }
+
+  const data = parseYamlRecord(yamlText);
+  const sections = data ? getCvSections(data) : null;
+  const selectedSectionValue = sections?.[selectedSection];
+
+  if (selectedSection && isSectionCompatibleWithTemplate(selectedSectionValue, template.id)) {
+    return selectedSection;
+  }
+
+  return template.sectionTitle;
 }
 
 function extractExperienceEntries(yamlText: string): ExperienceEntryForm[] {
@@ -665,6 +789,49 @@ function updateExperienceEntry(
   }
   if (updates.highlightsText !== undefined) {
     entry.highlights = textToHighlights(updates.highlightsText);
+  }
+
+  return stringifyYamlData(data);
+}
+
+function updateSectionEntryField(
+  yamlText: string,
+  sectionTitle: string,
+  entryIndex: number,
+  fieldKey: string,
+  value: string,
+): string {
+  const data = parseYamlRecord(yamlText);
+  if (!data) {
+    return yamlText;
+  }
+
+  const sections = getCvSections(data);
+  if (!sections) {
+    return yamlText;
+  }
+
+  const sectionValue = sections[sectionTitle];
+  if (!Array.isArray(sectionValue)) {
+    return yamlText;
+  }
+
+  if (fieldKey === '$text') {
+    sectionValue[entryIndex] = value;
+    return stringifyYamlData(data);
+  }
+
+  const entry = sectionValue[entryIndex];
+  if (!isRecordLike(entry)) {
+    return yamlText;
+  }
+
+  if (fieldKey === 'highlightsText') {
+    entry.highlights = textToHighlights(value);
+  } else if (fieldKey === 'authorsText') {
+    entry.authors = textToHighlights(value);
+  } else {
+    entry[fieldKey] = value;
   }
 
   return stringifyYamlData(data);
@@ -828,8 +995,24 @@ function insertEntryTemplate(
   sectionTitle: string,
   templateId: EntryTemplateId,
 ): string {
-  const template = entryTemplates.find((entryTemplate) => entryTemplate.id === templateId) ?? entryTemplates[0];
+  const template = getTemplateById(templateId);
   const safeSectionTitle = sectionTitle.trim() || template.sectionTitle;
+  const data = parseYamlRecord(yamlText);
+
+  if (data) {
+    const sections = ensureCvSections(data);
+    const sectionValue = sections[safeSectionTitle];
+    const nextEntry = buildStructuredEntry(template);
+
+    if (Array.isArray(sectionValue)) {
+      sectionValue.push(nextEntry);
+    } else {
+      sections[safeSectionTitle] = [nextEntry];
+    }
+
+    return stringifyYamlData(data);
+  }
+
   const preparedYaml = ensureSectionsBlock(yamlText);
   const lines = preparedYaml.trimEnd().split('\n');
   const existingSectionIndex = sectionLineIndex(lines, safeSectionTitle);
@@ -1430,73 +1613,409 @@ function YamlEditor({
   );
 }
 
+function SectionTextInput({
+  label,
+  name,
+  value,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  name: string;
+  value: string;
+  placeholder?: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <TextField fullWidth name={name}>
+      <Label className="text-xs font-semibold text-muted">{label}</Label>
+      <Input
+        placeholder={placeholder}
+        value={value}
+        variant="secondary"
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </TextField>
+  );
+}
+
+function SectionTextArea({
+  label,
+  name,
+  value,
+  placeholder,
+  rows = 4,
+  onChange,
+}: {
+  label: string;
+  name: string;
+  value: string;
+  placeholder?: string;
+  rows?: number;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <TextField fullWidth name={name}>
+      <Label className="text-xs font-semibold text-muted">{label}</Label>
+      <TextArea
+        className="min-h-24 resize-y text-sm leading-6"
+        placeholder={placeholder}
+        rows={rows}
+        value={value}
+        variant="secondary"
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </TextField>
+  );
+}
+
+function SectionEntryEditor({
+  sectionTitle,
+  entry,
+  entryIndex,
+  templateId,
+  onEntryChange,
+}: {
+  sectionTitle: string;
+  entry: unknown;
+  entryIndex: number;
+  templateId: EntryTemplateId;
+  onEntryChange: (sectionTitle: string, entryIndex: number, fieldKey: string, value: string) => void;
+}) {
+  const updateField = (fieldKey: string, value: string): void => {
+    onEntryChange(sectionTitle, entryIndex, fieldKey, value);
+  };
+  const entryRecord = isRecordLike(entry) ? entry : {};
+  const fieldName = (fieldKey: string): string => `${sectionTitle}-${entryIndex}-${fieldKey}`;
+  const input = (fieldKey: string, label: string, placeholder?: string): ReactNode => (
+    <SectionTextInput
+      key={fieldKey}
+      label={label}
+      name={fieldName(fieldKey)}
+      placeholder={placeholder}
+      value={stringValue(entryRecord[fieldKey])}
+      onChange={(value) => updateField(fieldKey, value)}
+    />
+  );
+  const highlightsInput = (
+    <SectionTextArea
+      label="Logros o detalles"
+      name={fieldName('highlightsText')}
+      placeholder="Una línea por logro o detalle"
+      value={highlightsToText(entryRecord.highlights)}
+      onChange={(value) => updateField('highlightsText', value)}
+    />
+  );
+
+  if (templateId === 'text') {
+    return (
+      <SectionTextArea
+        label="Texto"
+        name={fieldName('text')}
+        rows={5}
+        value={stringValue(entry)}
+        onChange={(value) => updateField('$text', value)}
+      />
+    );
+  }
+
+  if (templateId === 'experience') {
+    return (
+      <div className="grid gap-4 md:grid-cols-2">
+        {input('company', 'Empresa', 'Nombre de la empresa')}
+        {input('position', 'Cargo', 'Cargo o rol')}
+        {input('location', 'Ubicación', 'Ciudad o remoto')}
+        <div className="grid gap-3 sm:grid-cols-2">
+          {input('start_date', 'Inicio', '2024-01')}
+          {input('end_date', 'Fin', 'present')}
+        </div>
+        <div className="md:col-span-2">{highlightsInput}</div>
+      </div>
+    );
+  }
+
+  if (templateId === 'education') {
+    return (
+      <div className="grid gap-4 md:grid-cols-2">
+        {input('institution', 'Institución', 'Universidad o institución')}
+        {input('area', 'Área', 'Área de estudio')}
+        {input('degree', 'Título', 'Título obtenido')}
+        {input('location', 'Ubicación', 'Ciudad')}
+        <div className="grid gap-3 sm:grid-cols-2 md:col-span-2">
+          {input('start_date', 'Inicio', '2020-01')}
+          {input('end_date', 'Fin', '2024-12')}
+        </div>
+        <div className="md:col-span-2">{highlightsInput}</div>
+      </div>
+    );
+  }
+
+  if (templateId === 'normal') {
+    return (
+      <div className="grid gap-4 md:grid-cols-2">
+        {input('name', 'Nombre', 'Nombre del proyecto')}
+        {input('location', 'Ubicación', 'Remoto')}
+        {input('date', 'Fecha', '2025')}
+        <div className="md:col-span-2">{highlightsInput}</div>
+      </div>
+    );
+  }
+
+  if (templateId === 'publication') {
+    return (
+      <div className="grid gap-4 md:grid-cols-2">
+        {input('title', 'Título', 'Título de la publicación')}
+        {input('journal', 'Revista o conferencia')}
+        {input('date', 'Fecha', '2025-01')}
+        {input('doi', 'DOI')}
+        <div className="md:col-span-2">
+          <SectionTextArea
+            label="Autores"
+            name={fieldName('authorsText')}
+            placeholder="Un autor por línea"
+            value={highlightsToText(entryRecord.authors)}
+            onChange={(value) => updateField('authorsText', value)}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (templateId === 'bullet') {
+    return input('bullet', 'Viñeta', 'Premio, certificación o reconocimiento');
+  }
+
+  if (templateId === 'numbered') {
+    return input('number', 'Elemento numerado', 'Logro o resultado');
+  }
+
+  if (templateId === 'reversedNumbered') {
+    return input('reversed_number', 'Elemento inverso', 'Charla, ponencia o actividad');
+  }
+
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      {input('label', 'Etiqueta', 'Lenguajes')}
+      {input('details', 'Detalle', 'Python, TypeScript, SQL')}
+    </div>
+  );
+}
+
+function ActiveSectionEditor({
+  yamlText,
+  selectedSection,
+  onInsertEntry,
+  onEntryChange,
+}: {
+  yamlText: string;
+  selectedSection: string;
+  onInsertEntry: (sectionTitle: string, templateId: EntryTemplateId) => void;
+  onEntryChange: (sectionTitle: string, entryIndex: number, fieldKey: string, value: string) => void;
+}) {
+  const data = parseYamlRecord(yamlText);
+  const sections = data ? getCvSections(data) : null;
+  const sectionValue = selectedSection ? sections?.[selectedSection] : null;
+  const entries = Array.isArray(sectionValue) ? sectionValue : [];
+  const templateId = inferSectionTemplateId(entries) ?? 'text';
+  const template = getTemplateById(templateId);
+  const Icon = template.icon;
+
+  if (!selectedSection) {
+    return (
+      <div className="rounded-[20px] border border-dashed border-border bg-surface-secondary p-4">
+        <p className="text-sm font-semibold text-foreground">Ninguna sección seleccionada</p>
+        <p className="mt-1 text-sm leading-6 text-muted">
+          Selecciona una sección existente para editar sus entradas desde el formulario.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 rounded-[20px] border border-border bg-surface-secondary p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold text-muted">Editar sección</p>
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
+            <h4 className="min-w-0 text-base font-semibold text-foreground">{selectedSection}</h4>
+            <Chip color="accent" size="sm" variant="soft">
+              <Icon aria-hidden="true" className="size-3.5" />
+              {template.label}
+            </Chip>
+            <Chip color="default" size="sm" variant="soft">
+              {entries.length} entradas
+            </Chip>
+          </div>
+        </div>
+        <Button size="sm" variant="secondary" onPress={() => onInsertEntry(selectedSection, templateId)}>
+          <Plus aria-hidden="true" className="size-4" />
+          Agregar
+        </Button>
+      </div>
+
+      {entries.length === 0 ? (
+        <div className="rounded-[16px] border border-dashed border-border px-3 py-3 text-sm text-muted">
+          Esta sección está vacía. Agrega una entrada para editarla aquí.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {entries.map((entry, index) => (
+            <div className="rounded-[18px] border border-border bg-surface p-4" key={`${selectedSection}-${index}`}>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-foreground">Entrada {index + 1}</p>
+                <Chip color="default" size="sm" variant="soft">
+                  #{index + 1}
+                </Chip>
+              </div>
+              <SectionEntryEditor
+                entry={entry}
+                entryIndex={index}
+                sectionTitle={selectedSection}
+                templateId={inferTemplateIdFromEntry(entry) ?? templateId}
+                onEntryChange={onEntryChange}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SectionsBuilder({
   yamlText,
   onInsertEntry,
+  onSectionEntryChange,
 }: {
   yamlText: string;
   onInsertEntry: (sectionTitle: string, templateId: EntryTemplateId) => void;
+  onSectionEntryChange: (sectionTitle: string, entryIndex: number, fieldKey: string, value: string) => void;
 }) {
   const sectionTitles = extractSectionTitles(yamlText);
   const [selectedSection, setSelectedSection] = useState(sectionTitles[0] ?? 'Experiencia');
-  const [newSectionTitle, setNewSectionTitle] = useState('');
-  const activeSection = newSectionTitle.trim() || selectedSection || 'Experiencia';
+  const data = parseYamlRecord(yamlText);
+  const sections = data ? getCvSections(data) : null;
+  const selectedSectionForInsert = sectionTitles.includes(selectedSection) ? selectedSection : '';
+  const activeSectionLabel = selectedSectionForInsert || 'Destino automático';
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h3 className="text-sm font-semibold text-foreground" id="sections-info-heading">
             Secciones y entradas
           </h3>
+          <p className="mt-1 text-sm leading-6 text-muted">
+            Elige el destino y agrega bloques con una estructura lista para renderizar.
+          </p>
         </div>
-        <Chip color="default" size="sm" variant="soft">
-          {sectionTitles.length} secciones
-        </Chip>
+        <div className="flex flex-wrap items-center gap-2">
+          <Chip color="default" size="sm" variant="soft">
+            {sectionTitles.length} secciones
+          </Chip>
+          <Chip color="default" size="sm" variant="soft">
+            {activeSectionLabel}
+          </Chip>
+        </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-        <div className="space-y-3 rounded-[20px] border border-border bg-surface-secondary p-4">
-          <TextField fullWidth name="newSectionTitle">
-            <Label className="text-xs font-semibold text-muted">Nueva sección</Label>
-            <Input
-              placeholder="Ej. Certificaciones"
-              value={newSectionTitle}
-              variant="secondary"
-              onChange={(event) => setNewSectionTitle(event.target.value)}
-            />
-          </TextField>
-          <div className="flex flex-wrap gap-2">
-            {sectionTitles.map((title, index) => (
-              <Button
-                key={`${title}-${index}`}
-                size="sm"
-                variant={selectedSection === title && !newSectionTitle.trim() ? 'secondary' : 'tertiary'}
-                onPress={() => {
-                  setNewSectionTitle('');
-                  setSelectedSection(title);
-                }}
-              >
-                {title}
-              </Button>
-            ))}
+      <div className="grid min-w-0 gap-4 2xl:grid-cols-[minmax(220px,0.85fr)_minmax(0,1.15fr)]">
+        <div className="min-w-0 space-y-3 rounded-[20px] border border-border bg-surface-secondary p-4">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-muted">Secciones existentes</p>
+            <div className="grid min-w-0 gap-2 sm:grid-cols-2 2xl:grid-cols-1">
+              {sectionTitles.map((title, index) => (
+                <button
+                  aria-pressed={selectedSection === title}
+                  className={`flex min-h-11 min-w-0 items-center justify-between gap-2 rounded-full border px-4 py-2 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
+                    selectedSection === title
+                      ? 'border-accent bg-accent-soft text-accent'
+                      : 'border-border bg-surface text-foreground hover:border-border-tertiary'
+                  }`}
+                  key={`${title}-${index}`}
+                  type="button"
+                  onClick={() => {
+                    setSelectedSection((currentSection) => (currentSection === title ? '' : title));
+                  }}
+                >
+                  <span className="min-w-0 truncate text-sm font-semibold">{title}</span>
+                  {sections?.[title] ? (
+                    <span className="shrink-0 rounded-full bg-default px-2 py-0.5 text-[11px] font-semibold text-muted">
+                      {getTemplateById(inferSectionTemplateId(sections[title]) ?? 'text').label}
+                    </span>
+                  ) : null}
+                </button>
+              ))}
+              {sectionTitles.length === 0 ? (
+                <p className="rounded-[16px] border border-dashed border-border px-3 py-3 text-sm text-muted">
+                  Todavía no hay secciones. Usa un bloque de contenido para crear una.
+                </p>
+              ) : null}
+            </div>
           </div>
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-2">
+        <ActiveSectionEditor
+          onEntryChange={onSectionEntryChange}
+          onInsertEntry={onInsertEntry}
+          selectedSection={selectedSectionForInsert}
+          yamlText={yamlText}
+        />
+      </div>
+
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h4 className="text-sm font-semibold text-foreground">Agregar contenido</h4>
+            <p className="mt-1 text-sm leading-6 text-muted">
+              Estos bloques crean secciones editables en el formulario y visibles en el PDF.
+            </p>
+          </div>
+          <Chip color="default" size="sm" variant="soft">
+            {entryTemplates.length} tipos
+          </Chip>
+        </div>
+        <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-3">
           {entryTemplates.map((template) => {
             const Icon = template.icon;
+            const destinationSection = resolveEntryDestinationSection(
+              yamlText,
+              selectedSectionForInsert,
+              '',
+              template,
+            );
+            const selectedSectionValue = selectedSectionForInsert ? sections?.[selectedSectionForInsert] : undefined;
+            const usesAutomaticDestination =
+              selectedSectionForInsert &&
+              destinationSection !== selectedSectionForInsert &&
+              !isSectionCompatibleWithTemplate(selectedSectionValue, template.id);
             return (
-              <Button
-                className="justify-start"
+              <button
+                aria-label={`Agregar ${template.label} en ${destinationSection}`}
+                className="group flex min-h-[132px] min-w-0 flex-col items-start gap-3 rounded-[18px] border border-border bg-surface-secondary px-4 py-3 text-left transition-colors hover:border-accent/70 hover:bg-accent-soft focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                 key={template.id}
-                size="sm"
-                variant="secondary"
-                onPress={() => onInsertEntry(activeSection || template.sectionTitle, template.id)}
+                type="button"
+                onClick={() => {
+                  onInsertEntry(destinationSection, template.id);
+                  setSelectedSection(destinationSection);
+                }}
               >
-                <Icon aria-hidden="true" className="size-4" />
-                {template.label}
-              </Button>
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="grid size-8 shrink-0 place-items-center rounded-full bg-accent-soft text-accent">
+                    <Icon aria-hidden="true" className="size-4" />
+                  </span>
+                  <span className="min-w-0 text-base font-semibold leading-5 text-foreground">{template.label}</span>
+                </span>
+                <span className="block min-w-0 flex-1 text-sm leading-5 text-muted">{template.description}</span>
+                <span className="block min-w-0 text-xs font-semibold leading-5 text-accent">
+                  <span className="text-muted">Destino:</span> {destinationSection}
+                </span>
+                {usesAutomaticDestination ? (
+                  <span className="block min-w-0 rounded-[12px] bg-warning/10 px-2.5 py-1.5 text-xs font-semibold leading-4 text-warning">
+                    Se usa una sección compatible para evitar errores de render.
+                  </span>
+                ) : null}
+              </button>
             );
           })}
         </div>
@@ -1513,6 +2032,7 @@ function EditorPanel({
   onPersonalFieldChange,
   onSocialFieldChange,
   onExperienceEntryChange,
+  onSectionEntryChange,
   onInsertEntry,
   onThemeChange,
 }: {
@@ -1527,6 +2047,7 @@ function EditorPanel({
     index: number,
     updates: Partial<Omit<ExperienceEntryForm, 'sectionTitle' | 'index'>>,
   ) => void;
+  onSectionEntryChange: (sectionTitle: string, entryIndex: number, fieldKey: string, value: string) => void;
   onInsertEntry: (sectionTitle: string, templateId: EntryTemplateId) => void;
   onThemeChange: (theme: ThemeId) => void;
 }) {
@@ -1608,7 +2129,11 @@ function EditorPanel({
               </section>
 
               <section aria-labelledby="sections-info-heading">
-                <SectionsBuilder yamlText={yamlText} onInsertEntry={onInsertEntry} />
+                <SectionsBuilder
+                  onInsertEntry={onInsertEntry}
+                  onSectionEntryChange={onSectionEntryChange}
+                  yamlText={yamlText}
+                />
               </section>
 
               <div className="rounded-[20px] border border-border bg-surface-secondary p-4">
@@ -1890,6 +2415,15 @@ export default function Home() {
     updateYamlText(updateExperienceEntry(yamlText, sectionTitle, index, updates));
   };
 
+  const updateSectionField = (
+    sectionTitle: string,
+    entryIndex: number,
+    fieldKey: string,
+    value: string,
+  ): void => {
+    updateYamlText(updateSectionEntryField(yamlText, sectionTitle, entryIndex, fieldKey, value));
+  };
+
   const insertEntry = (sectionTitle: string, templateId: EntryTemplateId): void => {
     updateYamlText(insertEntryTemplate(yamlText, sectionTitle, templateId));
   };
@@ -2072,6 +2606,7 @@ export default function Home() {
                 onExperienceEntryChange={updateExperienceField}
                 onInsertEntry={insertEntry}
                 onPersonalFieldChange={updatePersonalField}
+                onSectionEntryChange={updateSectionField}
                 onSocialFieldChange={updateSocialField}
                 onThemeChange={updateTheme}
                 onYamlChange={updateYamlText}
