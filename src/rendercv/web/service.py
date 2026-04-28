@@ -1,6 +1,8 @@
 import base64
+from collections.abc import Mapping
 import pathlib
 import tempfile
+from typing import Any
 
 from rendercv.exception import (
     RenderCVUserError,
@@ -11,7 +13,10 @@ from rendercv.renderer.markdown import generate_markdown
 from rendercv.renderer.pdf_png import generate_pdf, generate_png
 from rendercv.renderer.typst import generate_typst
 from rendercv.schema.models.rendercv_model import RenderCVModel
-from rendercv.schema.rendercv_model_builder import build_rendercv_dictionary_and_model
+from rendercv.schema.rendercv_model_builder import (
+    build_rendercv_dictionary_and_model,
+    read_yaml_with_validation_errors,
+)
 
 from .models import (
     ArtifactFormat,
@@ -20,6 +25,84 @@ from .models import (
     ValidateRequest,
     ValidationIssue,
 )
+
+type RawYamlMapping = Mapping[str, Any]
+
+blocked_web_yaml_paths: tuple[tuple[str, ...], ...] = (
+    ("cv", "photo"),
+    ("settings", "render_command", "design"),
+    ("settings", "render_command", "locale"),
+    ("settings", "render_command", "output_folder"),
+    ("settings", "render_command", "typst_path"),
+    ("settings", "render_command", "pdf_path"),
+    ("settings", "render_command", "markdown_path"),
+    ("settings", "render_command", "html_path"),
+    ("settings", "render_command", "png_path"),
+)
+
+blocked_web_override_paths: frozenset[str] = frozenset(
+    ".".join(path) for path in blocked_web_yaml_paths
+)
+
+
+def mapping_contains_path(mapping: RawYamlMapping, path: tuple[str, ...]) -> bool:
+    """Return true when a nested mapping contains the exact key path."""
+    current_value: Any = mapping
+    for key in path:
+        if not isinstance(current_value, Mapping) or key not in current_value:
+            return False
+        current_value = current_value[key]
+
+    return True
+
+
+def reject_blocked_web_paths_in_mapping(mapping: RawYamlMapping) -> None:
+    """Reject YAML settings that are unsafe for the public web API.
+
+    Why:
+        The CLI supports local files, remote photos, and user-selected output paths.
+        In the web API those values are attacker-controlled and can otherwise trigger
+        server-side URL fetches or writes outside the temporary render directory.
+    """
+    for path in blocked_web_yaml_paths:
+        if mapping_contains_path(mapping, path):
+            raise RenderCVUserError(
+                message=(
+                    f"`{'.'.join(path)}` is not supported by the web API. "
+                    "Remove it from the YAML request."
+                )
+            )
+
+
+def reject_blocked_web_overrides(overrides: dict[str, str] | None) -> None:
+    """Reject overrides that would reintroduce unsafe web-only fields."""
+    if overrides is None:
+        return
+
+    for key in overrides:
+        if key in blocked_web_override_paths:
+            raise RenderCVUserError(
+                message=(
+                    f"Override `{key}` is not supported by the web API. "
+                    "Remove it from the request."
+                )
+            )
+
+
+def check_web_request_fields(request: ValidateRequest) -> None:
+    """Validate web-specific security restrictions before model validation."""
+    main_mapping = read_yaml_with_validation_errors(
+        request.main_yaml, "main_yaml_file"
+    )
+    reject_blocked_web_paths_in_mapping(main_mapping)
+
+    if request.settings_yaml:
+        settings_mapping = read_yaml_with_validation_errors(
+            request.settings_yaml, "settings_yaml_file"
+        )
+        reject_blocked_web_paths_in_mapping(settings_mapping)
+
+    reject_blocked_web_overrides(request.overrides)
 
 
 def convert_validation_error(error: RenderCVValidationError) -> ValidationIssue:
@@ -153,6 +236,11 @@ def build_render_model(
         locale_yaml_file=request.locale_yaml,
         settings_yaml_file=request.settings_yaml,
         output_folder=output_folder,
+        typst_path=output_folder / "cv.typ",
+        pdf_path=output_folder / "cv.pdf",
+        markdown_path=output_folder / "cv.md",
+        html_path=output_folder / "cv.html",
+        png_path=output_folder / "cv.png",
         dont_generate_typst=dont_generate_typst,
         dont_generate_html=dont_generate_html,
         dont_generate_markdown=dont_generate_markdown,
@@ -175,6 +263,7 @@ def validate_web_request(request: ValidateRequest, max_yaml_bytes: int) -> None:
         RenderCVUserValidationError: If validation fails.
     """
     check_yaml_payload_size(request, max_yaml_bytes)
+    check_web_request_fields(request)
 
     with tempfile.TemporaryDirectory(prefix="rendercv-web-") as temporary_directory:
         working_directory = pathlib.Path(temporary_directory)
@@ -272,6 +361,7 @@ def render_web_request(
         List of generated artifacts.
     """
     check_yaml_payload_size(request, max_yaml_bytes)
+    check_web_request_fields(request)
 
     generate_typst_output = (
         request.formats.include_typst

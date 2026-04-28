@@ -1831,6 +1831,8 @@ function PreviewPanel({
             <div className="mx-auto" style={{ width: `${previewPageWidth}px` }}>
               <iframe
                 className="bg-white shadow-preview"
+                referrerPolicy="no-referrer"
+                sandbox=""
                 srcDoc={htmlArtifact.content}
                 style={{ height: `${previewFrameHeight}px`, width: `${previewPageWidth}px` }}
                 title="Previsualización HTML del CV"

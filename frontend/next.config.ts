@@ -1,5 +1,8 @@
 import type { NextConfig } from "next";
 
+const rendercvInternalApiBaseUrl =
+  process.env.RENDERCV_INTERNAL_API_BASE_URL ?? "http://127.0.0.1:8000";
+
 const nextConfig: NextConfig = {
   output: "standalone",
   turbopack: {
@@ -9,7 +12,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/rendercv-api/:path*",
-        destination: "http://backend:8000/:path*",
+        destination: `${rendercvInternalApiBaseUrl}/:path*`,
       },
     ];
   },

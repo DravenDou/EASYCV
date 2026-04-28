@@ -48,6 +48,7 @@ classifiers = [
 # RenderCV depends on these packages. They are installed automatically when RenderCV is installed:
 dependencies = [
   "Jinja2>=3.1.6",  # Generate Typst and Markdown files
+  "bleach>=6.2.0,<7.0.0",  # Sanitize generated HTML
   "markdown>=3.10.2",  # Convert Markdown to HTML
   "phonenumbers>=9.0.24",  # Validate phone numbers
   "pydantic-extra-types>=2.11.0",  # Validate extra types

@@ -310,3 +310,15 @@ def test_markdown_to_html():
     assert (
         markdown_to_html("Hello, **world**!") == "<p>Hello, <strong>world</strong>!</p>"
     )
+
+
+def test_markdown_to_html_removes_unsafe_html():
+    result = markdown_to_html(
+        'Hello <script>alert(1)</script><img src=x onerror=alert(1)>'
+        '<a href="javascript:alert(1)">link</a>'
+    )
+
+    assert "<script>" not in result
+    assert "<img" not in result
+    assert "javascript:" not in result
+    assert "<a>link</a>" in result

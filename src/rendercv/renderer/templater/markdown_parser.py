@@ -2,8 +2,39 @@ import itertools
 import re
 from xml.etree.ElementTree import Element
 
+import bleach
 import markdown
 import markdown.core
+
+allowed_html_tags = frozenset(
+    {
+        "a",
+        "blockquote",
+        "br",
+        "code",
+        "del",
+        "em",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "hr",
+        "li",
+        "ol",
+        "p",
+        "pre",
+        "strong",
+        "ul",
+    }
+)
+
+allowed_html_attributes = {
+    "a": ["href", "title"],
+}
+
+allowed_html_protocols = frozenset({"http", "https", "mailto", "tel"})
 
 
 def to_typst_string(elem: Element) -> str:
@@ -199,6 +230,13 @@ def markdown_to_html(markdown_string: str) -> str:
         markdown_string: Markdown content.
 
     Returns:
-        HTML-formatted string.
+        Sanitized HTML-formatted string.
     """
-    return markdown.markdown(markdown_string)
+    html = markdown.markdown(markdown_string)
+    return bleach.clean(
+        html,
+        tags=allowed_html_tags,
+        attributes=allowed_html_attributes,
+        protocols=allowed_html_protocols,
+        strip=True,
+    )

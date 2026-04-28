@@ -33,11 +33,13 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_RENDERCV_API_BASE_URL: ${NEXT_PUBLIC_RENDERCV_API_BASE_URL:-/rendercv-api}
+        RENDERCV_INTERNAL_API_BASE_URL: ${RENDERCV_INTERNAL_API_BASE_URL:-http://backend:8000}
     environment:
       NODE_ENV: production
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
       NEXT_PUBLIC_RENDERCV_API_BASE_URL: ${NEXT_PUBLIC_RENDERCV_API_BASE_URL:-/rendercv-api}
+      RENDERCV_INTERNAL_API_BASE_URL: ${RENDERCV_INTERNAL_API_BASE_URL:-http://backend:8000}
     depends_on:
       backend:
         condition: service_healthy
