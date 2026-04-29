@@ -1,3 +1,5 @@
+import pathlib
+
 import pytest
 
 from rendercv.exception import RenderCVUserError
@@ -143,3 +145,37 @@ def test_render_web_request_allows_normal_markdown_render() -> None:
     assert artifacts[0].format == "markdown"
     assert artifacts[0].filename == "cv.md"
     assert "Jane Doe" in artifacts[0].content
+
+
+def test_render_web_request_accepts_frontend_sample_yaml() -> None:
+    sample_yaml_path = (
+        pathlib.Path(__file__).parents[2] / "frontend" / "public" / "sample-cv.yaml"
+    )
+    request = RenderRequest(
+        main_yaml=sample_yaml_path.read_text(encoding="utf-8"),
+        formats=RenderFormats(
+            include_pdf=False,
+            include_png=False,
+            include_html=False,
+            include_markdown=True,
+            include_typst=False,
+        ),
+        design_yaml="""
+design:
+  theme: classic
+""",
+        locale_yaml="""
+locale:
+  language: spanish
+""",
+    )
+
+    artifacts = render_web_request(
+        request,
+        max_yaml_bytes=500_000,
+        max_artifact_bytes=12_000_000,
+    )
+
+    assert len(artifacts) == 1
+    assert artifacts[0].format == "markdown"
+    assert "John Doe" in artifacts[0].content
