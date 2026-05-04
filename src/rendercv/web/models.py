@@ -109,3 +109,23 @@ class HealthResponse(BaseModelWithoutExtraKeys):
 
     status: Literal["ok"]
     version: str
+
+
+class PhotoUploadResponse(BaseModelWithoutExtraKeys):
+    """Response returned after a successful photo upload.
+
+    Why:
+        Clients receive a short-lived token URL they can reference in
+        subsequent render requests as cv.photo without path traversal risk.
+
+    Args:
+        request_id: Echo of the request identifier.
+        token: UUID token identifying the stored image.
+        photo_url: Server path to retrieve the image.
+        expires_at: Unix timestamp when the token expires.
+    """
+
+    request_id: str
+    token: str
+    photo_url: str
+    expires_at: int

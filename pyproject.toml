@@ -47,13 +47,15 @@ classifiers = [
 ]  # See all classifiers at https://pypi.org/classifiers/
 # RenderCV depends on these packages. They are installed automatically when RenderCV is installed:
 dependencies = [
-  "Jinja2>=3.1.6",  # Generate Typst and Markdown files
-  "bleach>=6.2.0,<7.0.0",  # Sanitize generated HTML
-  "markdown>=3.10.2",  # Convert Markdown to HTML
-  "phonenumbers>=9.0.24",  # Validate phone numbers
-  "pydantic-extra-types>=2.11.0",  # Validate extra types
-  "pydantic[email]>=2.12.5",  # Validate and parse input files
-  "ruamel.yaml>=0.19.1",  # Parse YAML files
+  "Jinja2>=3.1.6", # Generate Typst and Markdown files
+  "bleach>=6.2.0,<7.0.0", # Sanitize generated HTML
+  "cachetools>=7.1.0",
+  "markdown>=3.10.2", # Convert Markdown to HTML
+  "phonenumbers>=9.0.24", # Validate phone numbers
+  "pydantic-extra-types>=2.11.0", # Validate extra types
+  "pydantic[email]>=2.12.5", # Validate and parse input files
+  "python-multipart>=0.0.27",
+  "ruamel.yaml>=0.19.1", # Parse YAML files
 ]
 
 [project.optional-dependencies]
@@ -65,8 +67,12 @@ full = [
   "packaging>=26.0",  # For version checking
 ]
 web = [
-  "fastapi>=0.128.0,<0.129.0",  # API framework (Context7 stable reference)
-  "uvicorn>=0.38.0,<0.39.0",  # ASGI server
+  "fastapi>=0.128.0,<0.129.0", # API framework (Context7 stable reference)
+  "slowapi>=0.1.9",
+  "uvicorn>=0.38.0,<0.39.0", # ASGI server
+]
+dev = [
+    "httpx>=0.28.1",
 ]
 
 [project.urls]
