@@ -12,6 +12,7 @@ import {
 } from '@/lib/rendercv-api';
 import { buildPreviewProfile } from '@/lib/yaml-helpers';
 import type {
+  CvLanguage,
   RenderFormatSelection,
   ThemeId,
   ValidationStatus,
@@ -37,7 +38,9 @@ import { PreviewPanel } from './components/preview-panel';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const DEFAULT_API_BASE = process.env.NEXT_PUBLIC_RENDERCV_API_BASE_URL ?? '/rendercv-api';
-const SPANISH_LOCALE_YAML = `locale:\n  language: spanish\n`;
+function buildLocaleYaml(lang: CvLanguage): string {
+  return `locale:\n  language: ${lang}\n`;
+}
 
 /**
  * Debounce delay (ms) before triggering a render after the user edits.
@@ -127,6 +130,7 @@ export default function Home() {
   const [selectedThemeId, setSelectedThemeId] = useState<ThemeId>('classic');
   const [formatSelection, setFormatSelection] = useState<RenderFormatSelection>(DEFAULT_FORMAT_SELECTION);
   const [customDesignYaml, setCustomDesignYaml] = useState('');
+  const [cvLanguage, setCvLanguage] = useState<CvLanguage>('spanish');
 
   // Track what triggered the last YAML change so we debounce appropriately.
   const changeSourceRef = useRef<YamlChangeSource>('yaml');
@@ -144,8 +148,8 @@ export default function Home() {
   const previewProfile = useMemo(() => buildPreviewProfile(yamlText), [yamlText]);
   const renderOptions = useMemo(() => ({
     designYaml: customDesignYaml || `design:\n  theme: ${selectedThemeId}\n`,
-    localeYaml: SPANISH_LOCALE_YAML,
-  }), [customDesignYaml, selectedThemeId]);
+    localeYaml: buildLocaleYaml(cvLanguage),
+  }), [customDesignYaml, selectedThemeId, cvLanguage]);
 
   // ── YAML mutators ─────────────────────────────────────────────────────────
 
@@ -337,10 +341,12 @@ export default function Home() {
             canRedo={canRedo}
             canUndo={canUndo}
             formatSelection={formatSelection}
+            language={cvLanguage}
             renderStatus={renderStatus}
             validationStatus={validationStatus}
             onCopyYaml={() => { void handleCopyYaml(); }}
             onFormatChange={setFormatSelection}
+            onLanguageChange={setCvLanguage}
             onLoadSample={() => { void loadSample(); }}
             onRedo={redo}
             onUndo={undo}

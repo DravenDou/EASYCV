@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Button, Chip } from '@heroui/react';
+import { Button } from '@heroui/react';
 import {
   ChevronDown,
   Code2,
@@ -14,11 +14,28 @@ import {
   Type,
 } from 'lucide-react';
 
-import type { RenderStatus, ValidationStatus, RenderFormatSelection } from '@/lib/types';
+import type { CvLanguage, RenderStatus, ValidationStatus, RenderFormatSelection } from '@/lib/types';
 import type { RenderedArtifact } from '@/lib/rendercv-api';
 import { artifactHref } from '@/lib/yaml-helpers';
 import { chipColorForRender, chipColorForValidation, statusLabelForRender, statusLabelForValidation } from '@/lib/yaml-helpers';
 import { ThemeToggle, ToolButton } from './ui-primitives';
+
+// ─── chip-like badge (no HeroUI to avoid SSR flicker) ────────────────────────
+
+function StatusBadge({ color, children }: { color: 'success' | 'warning' | 'danger' | 'accent' | 'default'; children: React.ReactNode }) {
+  const colorMap = {
+    success: 'bg-success/15 text-success border-success/30',
+    warning: 'bg-warning/15 text-warning border-warning/30',
+    danger: 'bg-danger/15 text-danger border-danger/30',
+    accent: 'bg-accent/15 text-accent border-accent/30',
+    default: 'bg-surface-secondary text-muted border-border',
+  };
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${colorMap[color]}`}>
+      {children}
+    </span>
+  );
+}
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -33,6 +50,34 @@ function downloadOne(artifact: RenderedArtifact): void {
 
 function downloadAll(artifacts: RenderedArtifact[]): void {
   artifacts.forEach(downloadOne);
+}
+
+// ─── Language toggle ──────────────────────────────────────────────────────────
+
+function LanguageToggle({
+  language,
+  onChange,
+}: {
+  language: CvLanguage;
+  onChange: (lang: CvLanguage) => void;
+}) {
+  const isEnglish = language === 'english';
+  return (
+    <button
+      aria-label={`Idioma del CV: ${isEnglish ? 'Inglés' : 'Español'}. Clic para cambiar.`}
+      className="flex h-9 shrink-0 items-center gap-0 overflow-hidden rounded-full border border-border bg-surface-secondary text-xs font-bold transition-colors hover:border-border-tertiary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      title={`CV en ${isEnglish ? 'inglés' : 'español'}. Clic para cambiar.`}
+      type="button"
+      onClick={() => onChange(isEnglish ? 'spanish' : 'english')}
+    >
+      <span className={`flex h-full items-center px-3 py-1 transition-colors ${!isEnglish ? 'bg-accent text-accent-foreground' : 'text-muted'}`}>
+        ES
+      </span>
+      <span className={`flex h-full items-center px-3 py-1 transition-colors ${isEnglish ? 'bg-accent text-accent-foreground' : 'text-muted'}`}>
+        EN
+      </span>
+    </button>
+  );
 }
 
 // ─── DownloadMenu ─────────────────────────────────────────────────────────────
@@ -60,7 +105,6 @@ function DownloadMenu({
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close on outside click
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent): void => {
@@ -71,7 +115,6 @@ function DownloadMenu({
   }, [open]);
 
   const hasAny = artifacts.length > 0;
-
   const formatKeys: Array<keyof RenderFormatSelection> = ['pdf', 'png', 'html', 'markdown', 'typst'];
 
   const toggleFormat = (key: keyof RenderFormatSelection): void => {
@@ -109,9 +152,9 @@ function DownloadMenu({
             >
               <Download aria-hidden="true" className="size-4 shrink-0 text-accent" />
               Descargar todo
-              <Chip className="ml-auto" color="default" size="sm" variant="soft">
+              <span className="ml-auto rounded-full bg-surface-secondary px-2 py-0.5 text-[11px] font-bold text-muted">
                 {artifacts.length}
-              </Chip>
+              </span>
             </button>
           </div>
 
@@ -142,19 +185,17 @@ function DownloadMenu({
                     onClick={() => toggleFormat(key)}
                   >
                     {enabled ? (
-                      <svg className="size-3" fill="currentColor" viewBox="0 0 12 12">
-                        <path d="M10 3L5 8.5 2 5.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} fill="none" />
+                      <svg className="size-3" fill="none" viewBox="0 0 12 12">
+                        <path d="M2 6l3 3 5-5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} />
                       </svg>
                     ) : null}
                   </button>
 
-                  {/* Label */}
                   <Icon aria-hidden="true" className="size-4 shrink-0 text-muted" />
                   <span className={`flex-1 text-sm font-medium ${enabled ? 'text-foreground' : 'text-muted'}`}>
                     {meta.label}
                   </span>
 
-                  {/* Download button for this format */}
                   {available.length > 0 ? (
                     <button
                       aria-label={`Descargar ${meta.label}`}
@@ -165,9 +206,7 @@ function DownloadMenu({
                       <Download aria-hidden="true" className="size-3.5" />
                     </button>
                   ) : (
-                    <span className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-muted/50">
-                      —
-                    </span>
+                    <span className="px-1.5 py-0.5 text-[10px] font-semibold text-muted/50">—</span>
                   )}
                 </div>
               );
@@ -186,9 +225,11 @@ export function TopBar({
   renderStatus,
   artifacts,
   formatSelection,
+  language,
   onLoadSample,
   onCopyYaml,
   onFormatChange,
+  onLanguageChange,
   onUndo,
   onRedo,
   canUndo,
@@ -198,9 +239,11 @@ export function TopBar({
   renderStatus: RenderStatus;
   artifacts: RenderedArtifact[];
   formatSelection: RenderFormatSelection;
+  language: CvLanguage;
   onLoadSample: () => void;
   onCopyYaml: () => void;
   onFormatChange: (f: RenderFormatSelection) => void;
+  onLanguageChange: (lang: CvLanguage) => void;
   onUndo?: () => void;
   onRedo?: () => void;
   canUndo?: boolean;
@@ -208,18 +251,18 @@ export function TopBar({
 }) {
   return (
     <header className="sticky top-0 z-40 flex min-h-14 flex-col gap-2 border-b border-separator bg-background/95 px-3 py-2 backdrop-blur-md sm:flex-row sm:items-center sm:justify-between sm:px-4 sm:py-0 lg:pl-4">
-      {/* Left — status chips */}
+      {/* Left — status badges */}
       <div className="flex min-w-0 items-center justify-between gap-2 sm:justify-start">
         <div className="grid size-9 shrink-0 place-items-center rounded-[12px] border border-accent/25 bg-accent-soft text-accent lg:hidden">
           <FileText aria-hidden="true" className="size-5" />
         </div>
         <div className="hidden items-center gap-2 sm:flex">
-          <Chip color={chipColorForValidation(validationStatus)} size="sm" variant="soft">
+          <StatusBadge color={chipColorForValidation(validationStatus)}>
             {statusLabelForValidation(validationStatus)}
-          </Chip>
-          <Chip color={chipColorForRender(renderStatus)} size="sm" variant="soft">
+          </StatusBadge>
+          <StatusBadge color={chipColorForRender(renderStatus)}>
             {statusLabelForRender(renderStatus)}
-          </Chip>
+          </StatusBadge>
         </div>
         <div className="min-w-0 sm:hidden">
           <p className="truncate text-sm font-semibold text-foreground">CV Studio</p>
@@ -235,6 +278,9 @@ export function TopBar({
         <div className="hidden sm:block">
           <ThemeToggle />
         </div>
+
+        {/* Language toggle */}
+        <LanguageToggle language={language} onChange={onLanguageChange} />
 
         {/* Undo / Redo / Copy */}
         <div className="hidden items-center gap-1 md:flex">

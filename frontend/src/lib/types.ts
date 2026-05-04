@@ -10,6 +10,9 @@ export type ChipTone = 'default' | 'accent' | 'success' | 'warning' | 'danger';
 export type PersonalFieldKey = 'name' | 'headline' | 'location' | 'email' | 'phone' | 'website';
 export type TemplateStatus = 'Activo' | 'Borrador' | 'Nuevo';
 export type SocialNetworkKey = 'LinkedIn' | 'GitHub';
+
+/** Language used for the rendered CV (controls locale_yaml sent to backend). */
+export type CvLanguage = 'spanish' | 'english';
 export type EntryTemplateId =
   | 'text'
   | 'experience'

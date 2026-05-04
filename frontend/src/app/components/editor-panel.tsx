@@ -1,6 +1,6 @@
 'use client';
 
-import { Chip, ScrollShadow, Tabs } from '@heroui/react';
+import { ScrollShadow, Tabs } from '@heroui/react';
 import { ClipboardCheck, Palette, ShieldCheck, TerminalSquare } from 'lucide-react';
 
 import type { EntryTemplateId, ExperienceEntryForm, PersonalFieldKey, RenderFormatSelection, SocialNetworkKey, ThemeId } from '@/lib/types';
@@ -64,9 +64,9 @@ export function EditorPanel({
   return (
     <WorkspacePanel
       actions={
-        <Chip color="accent" size="sm" variant="soft">
+        <span className="rounded-full border border-border bg-surface-secondary px-2.5 py-1 text-xs font-semibold tabular-nums text-muted">
           {formatNumber(yamlLineCount)} líneas
-        </Chip>
+        </span>
       }
       className="min-h-[640px] overflow-hidden xl:h-[calc(100vh-6rem)] xl:min-h-[680px]"
       eyebrow="Área principal"
@@ -79,21 +79,19 @@ export function EditorPanel({
               <Tabs.Tab id="yaml">
                 <TerminalSquare aria-hidden="true" className="mr-2 size-4" />
                 YAML
-                <Tabs.Indicator />
               </Tabs.Tab>
               <Tabs.Tab id="formulario">
                 <ClipboardCheck aria-hidden="true" className="mr-2 size-4" />
                 Formulario
-                <Tabs.Indicator />
               </Tabs.Tab>
               <Tabs.Tab id="diseno">
                 <Palette aria-hidden="true" className="mr-2 size-4" />
                 Diseño
-                <Tabs.Indicator />
               </Tabs.Tab>
             </Tabs.List>
           </Tabs.ListContainer>
         </div>
+
 
         {/* YAML tab */}
         <Tabs.Panel className="min-h-0 p-3 sm:p-4" id="yaml">

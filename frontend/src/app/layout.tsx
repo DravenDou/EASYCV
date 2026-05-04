@@ -16,8 +16,14 @@ const monoFont = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CV Studio",
-  description: "Editor web para validar, previsualizar y exportar CVs.",
+  title: "EasyCV — Editor web de CVs",
+  description: "Edita, previsualiza y exporta tu CV profesional en segundos con EasyCV.",
+  icons: {
+    icon: [
+      { url: "/logo.png", type: "image/png" },
+    ],
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({

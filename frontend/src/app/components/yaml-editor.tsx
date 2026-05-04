@@ -4,8 +4,8 @@ import CodeMirror from '@uiw/react-codemirror';
 import { yaml } from '@codemirror/lang-yaml';
 import { lintGutter } from '@codemirror/lint';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { Button, Chip } from '@heroui/react';
-import { BriefcaseBusiness, Copy, GraduationCap, Plus, TerminalSquare } from 'lucide-react';
+import { Button } from '@heroui/react';
+import { Copy, TerminalSquare } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -19,7 +19,6 @@ export function YamlEditor({
   yamlText,
   yamlLineCount,
   onYamlChange,
-  onInsertEntry,
   onCopyYaml,
   onUndo,
   onRedo,
@@ -49,18 +48,21 @@ export function YamlEditor({
   return (
     <div className="overflow-hidden rounded-[20px] border border-border bg-field-background">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-separator px-3 py-2">
+        {/* Left: filename */}
         <div className="flex items-center gap-2">
           <TerminalSquare aria-hidden="true" className="size-4 text-accent" />
           <span className="text-xs font-semibold text-foreground">cv.yaml</span>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Chip color="default" size="sm" variant="soft">
+
+        {/* Right: stats + actions */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="rounded-full border border-border bg-surface-secondary px-2.5 py-1 text-xs font-semibold tabular-nums text-muted">
             {formatNumber(yamlLineCount)} líneas
-          </Chip>
-          <Chip color="default" size="sm" variant="soft">
-            {formatNumber(yamlText.length)} caracteres
-          </Chip>
-          {/* Undo / Redo buttons */}
+          </span>
+          <span className="rounded-full border border-border bg-surface-secondary px-2.5 py-1 text-xs font-semibold tabular-nums text-muted">
+            {formatNumber(yamlText.length)} car.
+          </span>
+
           {onUndo ? (
             <Button isDisabled={!canUndo} size="sm" variant="tertiary" onPress={onUndo}>
               ↩ Deshacer
@@ -77,33 +79,9 @@ export function YamlEditor({
               Copiar
             </Button>
           ) : null}
-          {/* Quick insert shortcuts */}
-          <Button
-            size="sm"
-            variant="tertiary"
-            onPress={() => onInsertEntry('Experiencia', 'experience')}
-          >
-            <BriefcaseBusiness aria-hidden="true" className="size-4" />
-            Experiencia
-          </Button>
-          <Button
-            size="sm"
-            variant="tertiary"
-            onPress={() => onInsertEntry('Educación', 'education')}
-          >
-            <GraduationCap aria-hidden="true" className="size-4" />
-            Educación
-          </Button>
-          <Button
-            size="sm"
-            variant="tertiary"
-            onPress={() => onInsertEntry('Proyectos', 'normal')}
-          >
-            <Plus aria-hidden="true" className="size-4" />
-            Proyecto
-          </Button>
         </div>
       </div>
+
       <div className="min-h-[420px] overflow-hidden sm:min-h-[560px]">
         <CodeMirror
           aria-label="YAML del CV"
