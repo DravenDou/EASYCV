@@ -189,9 +189,20 @@ textarea {
 
   .button {
     border: 1px solid color-mix(in oklab, var(--border-tertiary) 72%, transparent);
-    min-height: 44px;
+    min-height: 38px;
     font-weight: 600;
     letter-spacing: 0.01em;
+  }
+
+  .button--sm {
+    min-height: 34px;
+    padding-inline: 0.75rem;
+  }
+
+  .button--icon-only.button--sm {
+    min-height: 34px;
+    width: 34px;
+    padding-inline: 0;
   }
 
   .button--primary {
@@ -231,6 +242,165 @@ textarea {
   .textarea[data-focus-visible="true"] {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 22%, transparent);
+  }
+
+  .cv-list-input.input {
+    width: 100%;
+    max-width: none;
+    min-height: 44px;
+    padding: 0.55rem 0.9rem;
+    font-size: 0.95rem;
+    line-height: 1.45;
+  }
+
+  .cv-list-textarea.textarea {
+    width: 100%;
+    max-width: none;
+    min-height: 164px;
+    max-height: 360px;
+    padding: 0.8rem 0.95rem;
+    resize: vertical;
+    font-size: 0.95rem;
+    line-height: 1.55;
+  }
+
+  .cv-section-title-input.input {
+    width: 100%;
+    max-width: none;
+    min-height: 40px;
+    border-color: transparent;
+    background: transparent;
+    padding-inline: 0;
+    font-size: 1rem;
+    font-weight: 700;
+  }
+
+  .cv-section-title-input.input:hover,
+  .cv-section-title-input.input:focus-visible,
+  .cv-section-title-input.input[data-focus-visible="true"] {
+    border-color: var(--border);
+    background: var(--surface);
+    padding-inline: 0.75rem;
+  }
+
+  .cv-entry-details {
+    transition:
+      border-color 180ms ease,
+      background-color 180ms ease,
+      transform 180ms ease;
+  }
+
+  .cv-entry-details:hover,
+  .cv-entry-details:focus-within {
+    border-color: color-mix(in oklab, var(--accent) 52%, var(--border) 48%);
+    background: color-mix(in oklab, var(--surface) 92%, var(--accent) 8%);
+  }
+
+  .cv-entry-details[data-dragging="true"] {
+    opacity: 0.58;
+    transform: scale(0.99);
+  }
+
+  .cv-entry-details[data-drag-target="true"] {
+    border-color: var(--accent);
+    background: color-mix(in oklab, var(--surface) 86%, var(--accent) 14%);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 58%, transparent);
+  }
+
+  .cv-entry-drag-handle {
+    display: grid;
+    width: 2.25rem;
+    height: 2.25rem;
+    flex: 0 0 auto;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: 9999px;
+    background: var(--surface-secondary);
+    color: var(--muted);
+    cursor: grab;
+    transition:
+      border-color 160ms ease,
+      background-color 160ms ease,
+      color 160ms ease;
+  }
+
+  .cv-entry-drag-handle:hover,
+  .cv-entry-drag-handle:focus-visible {
+    border-color: color-mix(in oklab, var(--accent) 58%, var(--border) 42%);
+    background: color-mix(in oklab, var(--surface) 86%, var(--accent) 14%);
+    color: var(--accent);
+    outline: none;
+  }
+
+  .cv-entry-drag-handle:active {
+    cursor: grabbing;
+  }
+
+  .cv-entry-chevron {
+    transition:
+      transform 180ms ease,
+      color 180ms ease;
+  }
+
+  .cv-entry-details[data-open="true"] .cv-entry-chevron {
+    color: var(--accent);
+    transform: rotate(180deg);
+  }
+
+  .preview-toolbar {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.5rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-bottom: 1px solid var(--separator);
+    background: color-mix(in oklab, var(--surface) 92%, var(--background) 8%);
+    padding: 0.5rem 0.75rem;
+    scrollbar-width: thin;
+    white-space: nowrap;
+  }
+
+  .preview-control-group {
+    display: inline-flex;
+    flex: 0 0 auto;
+    min-height: 38px;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.25rem;
+    border: 1px solid color-mix(in oklab, var(--border) 80%, transparent);
+    border-radius: 9999px;
+    background: color-mix(in oklab, var(--surface-secondary) 88%, transparent);
+    padding: 0.1875rem;
+  }
+
+  .preview-pill-button.button {
+    min-height: 30px;
+    border-color: transparent;
+    padding-inline: 0.65rem;
+    font-size: 0.78rem;
+    line-height: 1;
+  }
+
+  .preview-pill-button.button--primary,
+  .preview-pill-button.button--secondary {
+    border-color: transparent;
+  }
+
+  .preview-zoom-value.chip {
+    min-width: 3.25rem;
+    justify-content: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (max-width: 1180px) {
+    .preview-toolbar {
+      padding-inline: 0.5rem;
+    }
+
+    .preview-control-group.ml-auto {
+      margin-left: 0;
+    }
   }
 
   .card {
@@ -300,4 +470,16 @@ textarea {
 
 .animate-preview-pop {
   animation: preview-pop 420ms ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cv-entry-details,
+  .cv-entry-chevron {
+    transition: none;
+  }
+
+  .animate-panel-in,
+  .animate-preview-pop {
+    animation: none;
+  }
 }

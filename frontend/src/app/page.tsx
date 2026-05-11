@@ -1,5 +1,7 @@
 'use client';
 
+import { Button, Chip } from '@heroui/react';
+import { AlertTriangle, FileSearch, TerminalSquare, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { clearStoredYaml, useLocalStorageYaml } from '@/lib/use-local-storage-yaml';
@@ -9,10 +11,12 @@ import {
   createRendercvClient,
   type RenderFormats,
   type RenderResponsePayload,
+  type ValidationIssue,
 } from '@/lib/rendercv-api';
 import { buildPreviewProfile } from '@/lib/yaml-helpers';
 import type {
   CvLanguage,
+  ImportedPdf,
   RenderFormatSelection,
   ThemeId,
   ValidationStatus,
@@ -21,6 +25,9 @@ import type {
   PersonalFieldKey,
   SocialNetworkKey,
   EntryTemplateId,
+  EditorTabId,
+  PdfImportReview,
+  PreviewFitMode,
 } from '@/lib/types';
 import {
   updateCvValue,
@@ -28,6 +35,13 @@ import {
   updateExperienceEntry,
   updateSectionEntryField,
   insertEntryTemplate,
+  deleteSectionEntry,
+  duplicateSectionEntry,
+  moveSectionEntryToIndex,
+  normalizeWrappedNormalSections,
+  replaceTextSectionEntries,
+  renameSection,
+  deleteSection,
 } from '@/lib/yaml-helpers';
 
 import { Sidebar } from './components/sidebar';
@@ -101,10 +115,121 @@ function buildRenderFormats(sel: RenderFormatSelection): RenderFormats {
   };
 }
 
+function isPreviewFitMode(value: string | null): value is PreviewFitMode {
+  return value === 'custom' || value === 'width' || value === 'page';
+}
+
+function getStoredPreviewScale(): number {
+  const storedScale = Number(window.localStorage.getItem('rendercv-preview-scale'));
+  return Number.isFinite(storedScale) && storedScale >= 0.6 && storedScale <= 1.6
+    ? storedScale
+    : 0.88;
+}
+
+function getStoredPreviewFitMode(): PreviewFitMode {
+  const storedFitMode = window.localStorage.getItem('rendercv-preview-fit-mode');
+  return isPreviewFitMode(storedFitMode) ? storedFitMode : 'custom';
+}
+
 // ─── Source-of-change tracking ────────────────────────────────────────────────
 // Distinguishes between "user typed in YAML tab" vs "form mutated YAML"
 // so we can apply different debounce delays.
 type YamlChangeSource = 'yaml' | 'form';
+
+function issueLocation(issue: ValidationIssue): string {
+  const schemaPath = issue.schema_location?.join('.') || 'YAML';
+  if (issue.start_line) {
+    return `${schemaPath} · línea ${issue.start_line}`;
+  }
+  return schemaPath;
+}
+
+function ValidationIssuesPanel({
+  issues,
+  onOpenYaml,
+}: {
+  issues: ValidationIssue[];
+  onOpenYaml: () => void;
+}) {
+  if (issues.length === 0) return null;
+
+  return (
+    <section className="rounded-[18px] border border-warning/40 bg-warning/10 px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 gap-3">
+          <AlertTriangle aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-warning" />
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-foreground">Errores por corregir</h3>
+            <p className="mt-1 text-sm leading-6 text-muted">
+              Revisa estos campos antes de descargar el CV final.
+            </p>
+          </div>
+        </div>
+        <Button size="sm" variant="secondary" onPress={onOpenYaml}>
+          <TerminalSquare aria-hidden="true" className="size-4" />
+          Abrir YAML
+        </Button>
+      </div>
+      <div className="mt-3 grid gap-2">
+        {issues.slice(0, 4).map((issue, index) => (
+          <div
+            className="rounded-[12px] border border-warning/25 bg-background/50 px-3 py-2"
+            key={`${issueLocation(issue)}-${index}`}
+          >
+            <p className="text-xs font-semibold text-warning">{issueLocation(issue)}</p>
+            <p className="mt-1 text-sm leading-5 text-foreground">{issue.message}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ImportReviewPanel({
+  review,
+  onDismiss,
+}: {
+  review: PdfImportReview | null;
+  onDismiss: () => void;
+}) {
+  if (!review) return null;
+
+  return (
+    <section className="rounded-[18px] border border-accent/30 bg-accent/10 px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 gap-3">
+          <FileSearch aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-accent" />
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-foreground">Revisar importación</h3>
+            <p className="mt-1 truncate text-sm text-muted">{review.fileName}</p>
+          </div>
+        </div>
+        <Button aria-label="Cerrar revisión de importación" isIconOnly size="sm" variant="tertiary" onPress={onDismiss}>
+          <X aria-hidden="true" className="size-4" />
+        </Button>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {review.detectedFields.slice(0, 10).map((field) => (
+          <Chip color="success" key={field} size="sm" variant="soft">
+            {field}
+          </Chip>
+        ))}
+      </div>
+      {review.warnings.length > 0 || review.unrecognizedLines.length > 0 ? (
+        <div className="mt-3 grid gap-2 text-sm leading-5 text-muted">
+          {review.warnings.slice(0, 3).map((warning) => (
+            <p key={warning}>{warning}</p>
+          ))}
+          {review.unrecognizedLines.length > 0 ? (
+            <p>
+              Líneas dudosas: {review.unrecognizedLines.slice(0, 3).join(' · ')}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
 
 // ─── Home ─────────────────────────────────────────────────────────────────────
 
@@ -124,24 +249,61 @@ export default function Home() {
   const [validationStatus, setValidationStatus] = useState<ValidationStatus>('idle');
   const [renderResult, setRenderResult] = useState<RenderResponsePayload | null>(null);
   const [renderStatus, setRenderStatus] = useState<RenderStatus>('idle');
+  const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([]);
   const [sampleStatus, setSampleStatus] = useState('Muestra inicial cargada');
-  const [sampleLoading, setSampleLoading] = useState(false);
+  const [, setSampleLoading] = useState(false);
   const [previewScale, setPreviewScale] = useState(0.88);
+  const [previewFitMode, setPreviewFitMode] = useState<PreviewFitMode>('custom');
+  const [editorTab, setEditorTab] = useState<EditorTabId>('lista');
   const [selectedThemeId, setSelectedThemeId] = useState<ThemeId>('classic');
   const [formatSelection, setFormatSelection] = useState<RenderFormatSelection>(DEFAULT_FORMAT_SELECTION);
   const [customDesignYaml, setCustomDesignYaml] = useState('');
   const [cvLanguage, setCvLanguage] = useState<CvLanguage>('spanish');
+  const [isYamlEnabled, setIsYamlEnabled] = useState(true);
+  const [importedPdf, setImportedPdf] = useState<ImportedPdf | null>(null);
+  const [importReview, setImportReview] = useState<PdfImportReview | null>(null);
 
   // Track what triggered the last YAML change so we debounce appropriately.
   const changeSourceRef = useRef<YamlChangeSource>('yaml');
+  const previewPreferencesLoadedRef = useRef(false);
+
+  useEffect(() => {
+    const normalizedYaml = normalizeWrappedNormalSections(yamlText);
+    if (normalizedYaml === yamlText) return;
+    const timeoutId = window.setTimeout(() => {
+      changeSourceRef.current = 'form';
+      setYamlSkipHistory(normalizedYaml);
+      setValidationStatus('idle');
+      setValidationIssues([]);
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [setYamlSkipHistory, yamlText]);
 
   // ── Banner ───────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (restoredFromStorage) setShowRestoredBanner(true);
+    if (!restoredFromStorage) return;
+    const timeoutId = window.setTimeout(() => setShowRestoredBanner(true), 0);
+    return () => window.clearTimeout(timeoutId);
   }, [restoredFromStorage]);
+
+  useEffect(() => {
+    const animationFrameId = window.requestAnimationFrame(() => {
+      setPreviewScale(getStoredPreviewScale());
+      setPreviewFitMode(getStoredPreviewFitMode());
+      previewPreferencesLoadedRef.current = true;
+    });
+    return () => window.cancelAnimationFrame(animationFrameId);
+  }, []);
+
+  useEffect(() => {
+    if (!previewPreferencesLoadedRef.current) return;
+    window.localStorage.setItem('rendercv-preview-scale', String(previewScale));
+    window.localStorage.setItem('rendercv-preview-fit-mode', previewFitMode);
+  }, [previewFitMode, previewScale]);
 
   // ── Derived state ─────────────────────────────────────────────────────────
   const htmlArtifact = renderResult?.artifacts.find((a) => a.format === 'html');
+  const pdfArtifact = renderResult?.artifacts.find((a) => a.format === 'pdf');
   const pngArtifacts = renderResult?.artifacts.filter((a) => a.format === 'png') ?? [];
   const allArtifacts = renderResult?.artifacts ?? [];
   const yamlLineCount = yamlText.split('\n').length;
@@ -165,6 +327,7 @@ export default function Home() {
       setRenderStatus('idle');
     }
     setValidationStatus('idle');
+    setValidationIssues([]);
   }, [setYaml]);
 
   /**
@@ -175,6 +338,7 @@ export default function Home() {
     changeSourceRef.current = 'form';
     setYaml(next);
     setValidationStatus('idle');
+    setValidationIssues([]);
   }, [setYaml]);
 
   const updatePersonalField = useCallback((field: PersonalFieldKey, value: string): void => {
@@ -206,8 +370,54 @@ export default function Home() {
     updateYamlFromForm(insertEntryTemplate(yamlText, sectionTitle, templateId));
   }, [yamlText, updateYamlFromForm]);
 
+  const deleteEntry = useCallback((sectionTitle: string, entryIndex: number): void => {
+    updateYamlFromForm(deleteSectionEntry(yamlText, sectionTitle, entryIndex));
+  }, [yamlText, updateYamlFromForm]);
+
+  const duplicateEntry = useCallback((sectionTitle: string, entryIndex: number): void => {
+    updateYamlFromForm(duplicateSectionEntry(yamlText, sectionTitle, entryIndex));
+  }, [yamlText, updateYamlFromForm]);
+
+  const reorderEntry = useCallback((
+    sectionTitle: string,
+    fromIndex: number,
+    toIndex: number,
+  ): void => {
+    updateYamlFromForm(moveSectionEntryToIndex(yamlText, sectionTitle, fromIndex, toIndex));
+  }, [yamlText, updateYamlFromForm]);
+
+  const replaceTextSection = useCallback((sectionTitle: string, value: string): void => {
+    updateYamlFromForm(replaceTextSectionEntries(yamlText, sectionTitle, value));
+  }, [yamlText, updateYamlFromForm]);
+
+  const renameCvSection = useCallback((sectionTitle: string, nextTitle: string): void => {
+    updateYamlFromForm(renameSection(yamlText, sectionTitle, nextTitle));
+  }, [yamlText, updateYamlFromForm]);
+
+  const deleteCvSection = useCallback((sectionTitle: string): void => {
+    updateYamlFromForm(deleteSection(yamlText, sectionTitle));
+  }, [yamlText, updateYamlFromForm]);
+
   // ── Helpers ───────────────────────────────────────────────────────────────
   const atLeastOneFormat = Object.values(formatSelection).some(Boolean);
+
+  const openYamlTab = useCallback((): void => {
+    setIsYamlEnabled(true);
+    setEditorTab('yaml');
+  }, []);
+
+  const handleYamlVisibilityChange = useCallback((visible: boolean): void => {
+    setIsYamlEnabled(visible);
+    if (!visible) {
+      setEditorTab((tab) => (tab === 'yaml' ? 'lista' : tab));
+    }
+  }, []);
+
+  const applyTheme = useCallback((theme: ThemeId): void => {
+    changeSourceRef.current = 'form';
+    setSelectedThemeId(theme);
+    setCustomDesignYaml('');
+  }, []);
 
   const handleCopyYaml = useCallback(async (): Promise<void> => {
     try {
@@ -218,6 +428,58 @@ export default function Home() {
     }
   }, [yamlText]);
 
+  const importPdf = useCallback(async (file: File): Promise<void> => {
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      setSampleStatus('Selecciona un archivo PDF válido');
+      return;
+    }
+
+    setSampleStatus(`Convirtiendo PDF: ${file.name}`);
+
+    try {
+      const client = createRendercvClient(DEFAULT_API_BASE);
+      const response = await client.importPdf(file);
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (): void => {
+          if (typeof reader.result === 'string') {
+            resolve(reader.result);
+          } else {
+            reject(new Error('Invalid PDF data URL'));
+          }
+        };
+        reader.onerror = (): void => reject(reader.error ?? new Error('PDF read failed'));
+        reader.readAsDataURL(file);
+      });
+
+      const normalizedYaml = normalizeWrappedNormalSections(response.yaml);
+      changeSourceRef.current = 'yaml';
+      setYamlSkipHistory(normalizedYaml);
+      setRenderResult(null);
+      setRenderStatus('idle');
+      setImportedPdf({
+        dataUrl,
+        name: file.name,
+        size: file.size,
+      });
+      setImportReview({
+        fileName: file.name,
+        warnings: response.warnings ?? [],
+        detectedFields: response.detected_fields ?? [],
+        unrecognizedLines: response.unrecognized_lines ?? [],
+      });
+      setValidationStatus('idle');
+      setValidationIssues([]);
+      setSampleStatus(`PDF convertido a YAML: ${file.name}`);
+    } catch (error) {
+      const message =
+        error instanceof RenderCvApiError
+          ? error.message
+          : 'No se pudo convertir el PDF a YAML';
+      setSampleStatus(message);
+    }
+  }, [setYamlSkipHistory]);
+
   const loadSample = useCallback(async (): Promise<void> => {
     setSampleLoading(true);
     setSampleStatus('Cargando muestra...');
@@ -227,11 +489,15 @@ export default function Home() {
       const text = await response.text();
       setYamlSkipHistory(text);
       setSampleStatus('Muestra cargada desde /sample-cv.yaml');
+      setImportedPdf(null);
+      setImportReview(null);
       clearStoredYaml();
       setShowRestoredBanner(false);
     } catch {
       setYamlSkipHistory(FALLBACK_YAML);
       setSampleStatus('Muestra integrada cargada');
+      setImportedPdf(null);
+      setImportReview(null);
     } finally {
       setSampleLoading(false);
     }
@@ -246,9 +512,15 @@ export default function Home() {
       setValidationStatus('validating');
       try {
         const res = await client.validate(yamlText, renderOptions, controller.signal);
-        if (!controller.signal.aborted) setValidationStatus(res.valid ? 'valid' : 'invalid');
-      } catch {
-        if (!controller.signal.aborted) setValidationStatus('error');
+        if (!controller.signal.aborted) {
+          setValidationStatus(res.valid ? 'valid' : 'invalid');
+          setValidationIssues(res.errors);
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setValidationStatus('error');
+          setValidationIssues(error instanceof RenderCvApiError ? error.validationErrors ?? [] : []);
+        }
       }
     }, VALIDATE_DEBOUNCE_MS);
     return () => { controller.abort(); window.clearTimeout(timeout); };
@@ -285,6 +557,7 @@ export default function Home() {
           setRenderStatus('error');
           if (error instanceof RenderCvApiError && error.validationErrors?.length) {
             setValidationStatus('invalid');
+            setValidationIssues(error.validationErrors);
           }
         }
       }
@@ -333,6 +606,7 @@ export default function Home() {
       <div className="flex min-h-dvh">
         <Sidebar
           sampleStatus={sampleStatus}
+          onImportPdf={(file) => { void importPdf(file); }}
           onLoadSample={() => { void loadSample(); }}
         />
         <div className="flex min-w-0 flex-1 flex-col">
@@ -350,37 +624,64 @@ export default function Home() {
             onLoadSample={() => { void loadSample(); }}
             onRedo={redo}
             onUndo={undo}
+            onYamlVisibilityChange={handleYamlVisibilityChange}
+            isYamlEnabled={isYamlEnabled}
           />
 
           <div className="min-w-0 flex-1 p-2 sm:p-4">
+            <div className="mb-4 space-y-3">
+              <ImportReviewPanel
+                review={importReview}
+                onDismiss={() => setImportReview(null)}
+              />
+              <ValidationIssuesPanel issues={validationIssues} onOpenYaml={openYamlTab} />
+            </div>
             <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(420px,0.95fr)_minmax(460px,1.05fr)]">
               <EditorPanel
                 canRedo={canRedo}
                 canUndo={canUndo}
                 customDesignYaml={customDesignYaml}
                 formatSelection={formatSelection}
+                isYamlEnabled={isYamlEnabled}
+                selectedTab={editorTab}
                 selectedThemeId={selectedThemeId}
                 yamlLineCount={yamlLineCount}
                 yamlText={yamlText}
                 onCopyYaml={() => { void handleCopyYaml(); }}
                 onCustomDesignYamlChange={setCustomDesignYaml}
+                onDeleteEntry={deleteEntry}
+                onDeleteSection={deleteCvSection}
+                onDuplicateEntry={duplicateEntry}
                 onExperienceEntryChange={updateExperienceField}
                 onFormatChange={setFormatSelection}
                 onInsertEntry={insertEntry}
                 onPersonalFieldChange={updatePersonalField}
+                onReplaceTextSection={replaceTextSection}
+                onReorderEntry={reorderEntry}
+                onRenameSection={renameCvSection}
                 onRedo={redo}
                 onSectionEntryChange={updateSectionField}
                 onSocialFieldChange={updateSocialField}
-                onThemeChange={setSelectedThemeId}
+                onTabChange={setEditorTab}
+                onThemeChange={applyTheme}
                 onUndo={undo}
                 onYamlChange={updateYamlText}
               />
               <PreviewPanel
+                generatedPreviewKey={`${selectedThemeId}:${customDesignYaml}`}
                 htmlArtifact={htmlArtifact}
+                importedPdf={importedPdf}
+                pdfArtifact={pdfArtifact}
                 pngArtifacts={pngArtifacts}
+                previewFitMode={previewFitMode}
                 previewScale={previewScale}
                 profile={previewProfile}
                 renderStatus={renderStatus}
+                onClearImportedPdf={() => {
+                  setImportedPdf(null);
+                  setImportReview(null);
+                }}
+                onPreviewFitModeChange={setPreviewFitMode}
                 onPreviewScaleChange={setPreviewScale}
               />
             </div>

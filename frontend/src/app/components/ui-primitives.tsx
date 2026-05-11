@@ -76,7 +76,7 @@ export function WorkspacePanel({
           {eyebrow ? <p className="text-xs font-semibold text-muted">{eyebrow}</p> : null}
           <h2 className="mt-1 truncate text-base font-semibold text-foreground">{title}</h2>
         </div>
-        {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+        {actions ? <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">{actions}</div> : null}
       </header>
 
       {children}

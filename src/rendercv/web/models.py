@@ -4,7 +4,6 @@ import pydantic
 
 from rendercv.schema.models.base import BaseModelWithoutExtraKeys
 
-
 type ArtifactFormat = Literal["pdf", "png", "html", "markdown", "typst"]
 type ArtifactEncoding = Literal["base64", "utf-8"]
 type ApiErrorCode = Literal[
@@ -93,6 +92,25 @@ class RenderResponse(BaseModelWithoutExtraKeys):
 
     request_id: str
     artifacts: list[RenderedArtifact]
+
+
+class PdfImportResponse(BaseModelWithoutExtraKeys):
+    """YAML generated from an uploaded PDF.
+
+    Why:
+        The web editor needs an immediate structured starting point when a
+        user imports an existing CV PDF. The conversion is intentionally
+        heuristic and non-AI: extracted text is mapped into a valid RenderCV
+        YAML document that the user can edit.
+    """
+
+    request_id: str
+    yaml: str
+    extracted_text: str
+    line_count: int
+    warnings: list[str] = pydantic.Field(default_factory=list)
+    detected_fields: list[str] = pydantic.Field(default_factory=list)
+    unrecognized_lines: list[str] = pydantic.Field(default_factory=list)
 
 
 class ErrorResponse(BaseModelWithoutExtraKeys):

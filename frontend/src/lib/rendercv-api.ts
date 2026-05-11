@@ -63,6 +63,16 @@ export type RenderResponsePayload = {
   artifacts: RenderedArtifact[];
 };
 
+export type PdfImportResponsePayload = {
+  request_id: string;
+  yaml: string;
+  extracted_text: string;
+  line_count: number;
+  warnings?: string[];
+  detected_fields?: string[];
+  unrecognized_lines?: string[];
+};
+
 type ApiErrorPayload = {
   request_id?: string;
   error_code?: string;
@@ -153,6 +163,34 @@ async function requestJson<T>(
   return (await response.json()) as T;
 }
 
+async function requestFormData<T>(
+  url: string,
+  formData: FormData,
+  signal?: AbortSignal,
+): Promise<T> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+    },
+    body: formData,
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorPayload = await parseApiError(response);
+    throw new RenderCvApiError(
+      errorPayload?.message || `Request failed with status ${response.status}.`,
+      response.status,
+      errorPayload?.error_code || "http_error",
+      errorPayload?.request_id || null,
+      errorPayload?.validation_errors || null,
+    );
+  }
+
+  return (await response.json()) as T;
+}
+
 export class RenderCvApiError extends Error {
   status: number;
   errorCode: string;
@@ -200,5 +238,14 @@ export function createRendercvClient(baseUrl: string) {
         buildRenderRequest(mainYaml, formats, options),
         signal,
       ),
+    importPdf: (file: File, signal?: AbortSignal) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      return requestFormData<PdfImportResponsePayload>(
+        buildUrl(normalizedBaseUrl, "/api/v1/import-pdf"),
+        formData,
+        signal,
+      );
+    },
   };
 }

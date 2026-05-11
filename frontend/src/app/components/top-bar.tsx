@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Button } from '@heroui/react';
+import { Button, Switch } from '@heroui/react';
 import {
   ChevronDown,
   Code2,
@@ -232,8 +232,10 @@ export function TopBar({
   onLanguageChange,
   onUndo,
   onRedo,
+  onYamlVisibilityChange,
   canUndo,
   canRedo,
+  isYamlEnabled,
 }: {
   validationStatus: ValidationStatus;
   renderStatus: RenderStatus;
@@ -246,8 +248,10 @@ export function TopBar({
   onLanguageChange: (lang: CvLanguage) => void;
   onUndo?: () => void;
   onRedo?: () => void;
+  onYamlVisibilityChange: (isVisible: boolean) => void;
   canUndo?: boolean;
   canRedo?: boolean;
+  isYamlEnabled: boolean;
 }) {
   return (
     <header className="sticky top-0 z-40 flex min-h-14 flex-col gap-2 border-b border-separator bg-background/95 px-3 py-2 backdrop-blur-md sm:flex-row sm:items-center sm:justify-between sm:px-4 sm:py-0 lg:pl-4">
@@ -281,6 +285,18 @@ export function TopBar({
 
         {/* Language toggle */}
         <LanguageToggle language={language} onChange={onLanguageChange} />
+
+        <label className="flex h-8 shrink-0 items-center gap-2 rounded-full border border-border bg-surface-secondary px-2 text-xs font-bold text-foreground">
+          <Switch
+            aria-label="Mostrar u ocultar editor YAML"
+            isSelected={isYamlEnabled}
+            size="sm"
+            onChange={onYamlVisibilityChange}
+          >
+            {() => null}
+          </Switch>
+          YAML
+        </label>
 
         {/* Undo / Redo / Copy */}
         <div className="hidden items-center gap-1 md:flex">

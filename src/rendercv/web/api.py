@@ -25,12 +25,14 @@ from rendercv.schema.models.base import BaseModelWithoutExtraKeys
 from .models import (
     ErrorResponse,
     HealthResponse,
+    PdfImportResponse,
     PhotoUploadResponse,
     RenderRequest,
     RenderResponse,
     ValidateRequest,
     ValidateResponse,
 )
+from .pdf_importer import convert_pdf_to_yaml
 from .service import convert_validation_errors, render_web_request, validate_web_request
 
 logger = logging.getLogger("rendercv.web.api")
@@ -46,6 +48,9 @@ ALLOWED_PHOTO_MIME_TYPES: frozenset[str] = frozenset(
     {"image/jpeg", "image/png", "image/webp"}
 )
 MAX_PHOTO_BYTES: int = 2 * 1024 * 1024  # 2 MB
+ALLOWED_PDF_MIME_TYPES: frozenset[str] = frozenset(
+    {"application/pdf", "application/x-pdf"}
+)
 
 
 type MiddlewareFactory = Callable[..., CORSMiddleware]
@@ -59,6 +64,7 @@ class WebApiSettings(BaseModelWithoutExtraKeys):
     max_artifact_bytes: int
     validate_timeout_seconds: int
     render_timeout_seconds: int
+    max_pdf_bytes: int
 
 
 def parse_cors_origins(origins_text: str | None) -> list[str]:
@@ -111,6 +117,9 @@ def load_web_api_settings() -> WebApiSettings:
         ),
         render_timeout_seconds=parse_int_setting(
             os.getenv("RENDERCV_WEB_RENDER_TIMEOUT_SECONDS"), 60
+        ),
+        max_pdf_bytes=parse_int_setting(
+            os.getenv("RENDERCV_WEB_MAX_PDF_BYTES"), 8_000_000
         ),
     )
 
@@ -187,9 +196,9 @@ def create_app(settings: WebApiSettings | None = None) -> FastAPI:
 
     @application.post("/api/v1/validate", response_model=ValidateResponse, tags=["render"])
     @limiter_validate.limit("30/minute")
-    async def validate_yaml(request: Request, body: ValidateRequest) -> ValidateResponse:  # noqa: ARG001
+    async def validate_yaml(request: Request, body: ValidateRequest) -> ValidateResponse:
         """Validate RenderCV payload and return structured issues if invalid."""
-        request_id = request_id_var.get()
+        request_id = request.headers.get("X-Request-Id") or request_id_var.get()
 
         try:
             await asyncio.wait_for(
@@ -244,9 +253,9 @@ def create_app(settings: WebApiSettings | None = None) -> FastAPI:
 
     @application.post("/api/v1/render", response_model=RenderResponse, tags=["render"])
     @limiter_render.limit("10/minute")
-    async def render_yaml(request: Request, body: RenderRequest) -> RenderResponse:  # noqa: ARG001
+    async def render_yaml(request: Request, body: RenderRequest) -> RenderResponse:
         """Render selected artifacts from RenderCV payload."""
-        request_id = request_id_var.get()
+        request_id = request.headers.get("X-Request-Id") or request_id_var.get()
 
         try:
             artifacts = await asyncio.wait_for(
@@ -316,7 +325,7 @@ def create_app(settings: WebApiSettings | None = None) -> FastAPI:
         Returns:
             PhotoUploadResponse with a token URL and expiry timestamp.
         """
-        request_id = request_id_var.get()
+        request_id = request.headers.get("X-Request-Id") or request_id_var.get()
 
         content_type = file.content_type or ""
         if content_type not in ALLOWED_PHOTO_MIME_TYPES:
@@ -375,6 +384,82 @@ def create_app(settings: WebApiSettings | None = None) -> FastAPI:
             expires_at=expires_at,
         )
 
+    @application.post(
+        "/api/v1/import-pdf",
+        response_model=PdfImportResponse,
+        tags=["media"],
+    )
+    async def import_pdf(request: Request, file: UploadFile) -> PdfImportResponse:
+        """Convert an uploaded PDF into editable RenderCV YAML.
+
+        Why:
+            Users often already have a CV as a PDF. This endpoint extracts
+            selectable text and maps it into a valid RenderCV YAML document
+            without AI, giving the frontend an immediate editable draft.
+        """
+        request_id = request.headers.get("X-Request-Id") or request_id_var.get()
+        content_type = file.content_type or ""
+        filename = file.filename or ""
+        if (
+            content_type not in ALLOWED_PDF_MIME_TYPES
+            and not filename.lower().endswith(".pdf")
+        ):
+            raise build_http_exception(
+                415,
+                ErrorResponse(
+                    request_id=request_id,
+                    error_code="user_error",
+                    message="Only PDF files can be imported.",
+                ),
+            )
+
+        pdf_bytes = await file.read(resolved_settings.max_pdf_bytes + 1)
+        if len(pdf_bytes) > resolved_settings.max_pdf_bytes:
+            raise build_http_exception(
+                413,
+                ErrorResponse(
+                    request_id=request_id,
+                    error_code="payload_too_large",
+                    message=(
+                        "PDF exceeds the "
+                        f"{resolved_settings.max_pdf_bytes} byte size limit."
+                    ),
+                ),
+            )
+
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(convert_pdf_to_yaml, pdf_bytes),
+                timeout=resolved_settings.validate_timeout_seconds,
+            )
+            return PdfImportResponse(
+                request_id=request_id,
+                yaml=result.yaml,
+                extracted_text=result.extracted_text,
+                line_count=result.line_count,
+                warnings=result.warnings,
+                detected_fields=result.detected_fields,
+                unrecognized_lines=result.unrecognized_lines,
+            )
+        except RenderCVUserError as error:
+            raise build_http_exception(
+                422,
+                ErrorResponse(
+                    request_id=request_id,
+                    error_code="user_error",
+                    message=error.message or "The PDF could not be converted.",
+                ),
+            ) from error
+        except TimeoutError as error:
+            raise build_http_exception(
+                408,
+                ErrorResponse(
+                    request_id=request_id,
+                    error_code="timeout",
+                    message="PDF import timed out.",
+                ),
+            ) from error
+
     @application.get("/api/v1/photo/{token}", tags=["media"])
     async def serve_photo(token: str) -> Response:
         """Serve a previously uploaded photo by its token."""
@@ -385,7 +470,7 @@ def create_app(settings: WebApiSettings | None = None) -> FastAPI:
 
     @application.post("/api/v1/render-stream", tags=["render"])
     @limiter_render.limit("10/minute")
-    async def render_yaml_stream(request: Request, body: RenderRequest) -> StreamingResponse:  # noqa: ARG001
+    async def render_yaml_stream(request: Request, body: RenderRequest) -> StreamingResponse:
         """Render with per-stage Server-Sent Events progress stream.
 
         Why:
@@ -396,7 +481,7 @@ def create_app(settings: WebApiSettings | None = None) -> FastAPI:
         Returns:
             text/event-stream response emitting JSON progress events.
         """
-        request_id = request_id_var.get()
+        request_id = request.headers.get("X-Request-Id") or request_id_var.get()
 
         async def event_stream() -> AsyncGenerator[str, None]:
             def send_event(stage: str, progress: float, message: str = "") -> str:

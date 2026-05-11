@@ -7,8 +7,10 @@ import type { LucideIcon } from 'lucide-react';
 export type ValidationStatus = 'idle' | 'validating' | 'valid' | 'invalid' | 'error';
 export type RenderStatus = 'idle' | 'rendering' | 'ready' | 'error';
 export type ChipTone = 'default' | 'accent' | 'success' | 'warning' | 'danger';
+export type EditorTabId = 'lista' | 'yaml' | 'formulario' | 'diseno';
+export type PreviewFitMode = 'custom' | 'width' | 'page';
 export type PersonalFieldKey = 'name' | 'headline' | 'location' | 'email' | 'phone' | 'website';
-export type TemplateStatus = 'Activo' | 'Borrador' | 'Nuevo';
+export type TemplateStatus = 'Activo' | 'Borrador' | 'Disponible' | 'Nuevo';
 export type SocialNetworkKey = 'LinkedIn' | 'GitHub';
 
 /** Language used for the rendered CV (controls locale_yaml sent to backend). */
@@ -109,6 +111,19 @@ export type PreviewProfile = {
   phone: string;
   website: string;
   position: string;
+};
+
+export type ImportedPdf = {
+  dataUrl: string;
+  name: string;
+  size: number;
+};
+
+export type PdfImportReview = {
+  fileName: string;
+  warnings: string[];
+  detectedFields: string[];
+  unrecognizedLines: string[];
 };
 
 /** Per-stage render progress. */

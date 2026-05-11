@@ -3,13 +3,13 @@
 import CodeMirror from '@uiw/react-codemirror';
 import { yaml } from '@codemirror/lang-yaml';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { Button, Chip, Switch, Label } from '@heroui/react';
-import { Palette, RotateCcw, Code2 } from 'lucide-react';
+import { Button, Chip, Switch } from '@heroui/react';
+import { CheckCircle2, Code2, RotateCcw } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { useEffect, useMemo, useState } from 'react';
 
 import { templateCards } from '@/constants/templates';
-import type { RenderFormatSelection, ThemeId } from '@/lib/types';
+import type { RenderFormatSelection, TemplateCard, ThemeId } from '@/lib/types';
 
 function buildDesignYaml(themeId: ThemeId): string {
   return `design:\n  theme: ${themeId}\n`;
@@ -22,6 +22,59 @@ const FORMAT_LABELS: Record<keyof RenderFormatSelection, string> = {
   markdown: 'Markdown',
   typst: 'Typst',
 };
+
+function ThemeMiniPreview({
+  isSelected,
+  template,
+}: {
+  isSelected: boolean;
+  template: TemplateCard;
+}) {
+  const isTwoColumn = template.id === 'moderncv' || template.id === 'opal';
+  const isDense = template.id === 'sb2nov' || template.id === 'engineeringresumes';
+  const isFormal = template.id === 'harvard' || template.id === 'engineeringclassic';
+
+  return (
+    <span
+      aria-hidden="true"
+      className={`mb-3 block aspect-[1/1.28] overflow-hidden rounded-[10px] border bg-white p-2 shadow-sm transition ${
+        isSelected ? 'border-accent/60 ring-2 ring-accent/20' : 'border-slate-200'
+      }`}
+    >
+      <span className="block h-full rounded-[6px] bg-slate-50 p-2">
+        <span
+          className={`mx-auto block h-2 rounded-full ${
+            isTwoColumn ? 'w-12' : isFormal ? 'w-20' : 'w-16'
+          } ${template.accentClassName}`}
+        />
+        <span className="mt-2 block h-1.5 w-20 rounded-full bg-slate-800" />
+        <span className="mt-1 block h-1 w-28 rounded-full bg-slate-300" />
+        <span className={isTwoColumn ? 'mt-3 grid grid-cols-[0.38fr_1fr] gap-2' : 'mt-3 block'}>
+          {isTwoColumn ? (
+            <span className="space-y-1.5">
+              <span className={`block h-1.5 w-full rounded-full ${template.accentClassName}`} />
+              <span className="block h-1.5 w-4/5 rounded-full bg-slate-300" />
+              <span className="block h-1.5 w-3/5 rounded-full bg-slate-300" />
+            </span>
+          ) : null}
+          <span className="block space-y-1.5">
+            <span className={`block h-1 w-16 rounded-full ${template.accentClassName}`} />
+            <span className="block h-1.5 w-full rounded-full bg-slate-300" />
+            <span className="block h-1.5 w-11/12 rounded-full bg-slate-300" />
+            <span className="block h-1.5 w-10/12 rounded-full bg-slate-300" />
+            <span className="mt-2 block h-1 w-14 rounded-full bg-slate-500" />
+            <span className="block h-1.5 w-full rounded-full bg-slate-300" />
+            <span
+              className={`block h-1.5 rounded-full bg-slate-300 ${
+                isDense ? 'w-full' : 'w-8/12'
+              }`}
+            />
+          </span>
+        </span>
+      </span>
+    </span>
+  );
+}
 
 export function DesignPanel({
   selectedThemeId,
@@ -84,11 +137,19 @@ export function DesignPanel({
             type="button"
             onClick={() => onThemeChange(template.id)}
           >
-            <span className={`mb-4 block h-1.5 w-12 rounded-full ${template.accentClassName}`} />
-            <span className="block text-sm font-semibold">{template.name}</span>
+            <ThemeMiniPreview
+              isSelected={selectedThemeId === template.id}
+              template={template}
+            />
+            <span className="flex items-center justify-between gap-2">
+              <span className="block text-sm font-semibold">{template.name}</span>
+              {selectedThemeId === template.id ? (
+                <CheckCircle2 aria-hidden="true" className="size-4 shrink-0" />
+              ) : null}
+            </span>
             <span className="mt-2 block text-xs text-muted">{template.description}</span>
             <span className="mt-3 inline-flex rounded-md bg-default px-2 py-1 text-[11px] font-semibold text-muted">
-              {template.status}
+              {selectedThemeId === template.id ? 'Aplicado' : template.status}
             </span>
           </button>
         ))}
@@ -165,10 +226,10 @@ export function DesignPanel({
               <Button
                 size="sm"
                 variant="tertiary"
-                onPress={() => onCustomDesignYamlChange(buildDesignYaml(selectedThemeId))}
+                onPress={() => onCustomDesignYamlChange('')}
               >
                 <RotateCcw aria-hidden="true" className="size-3.5" />
-                Resetear
+                Usar tema base
               </Button>
             </div>
             <CodeMirror

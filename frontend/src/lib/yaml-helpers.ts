@@ -118,6 +118,23 @@ export function isSectionCompatibleWithTemplate(
   return inferSectionTemplateId(sectionValue) === templateId;
 }
 
+function deepCloneValue(value: unknown): unknown {
+  if (typeof structuredClone === 'function') return structuredClone(value);
+  return JSON.parse(JSON.stringify(value)) as unknown;
+}
+
+function updateSections(
+  yamlText: string,
+  updater: (sections: Record<string, unknown>) => void,
+): string {
+  const data = parseYamlRecord(yamlText);
+  if (!data) return yamlText;
+  const sections = getCvSections(data);
+  if (!sections) return yamlText;
+  updater(sections);
+  return stringifyYamlData(data);
+}
+
 // ─── Structured entry builder ─────────────────────────────────────────────────
 
 export function buildStructuredEntry(templateId: EntryTemplateId): unknown {
@@ -313,6 +330,180 @@ export function insertEntryTemplate(
 
   lines.splice(sectionEndLineIndex(lines, existingIdx), 0, ...template.buildEntry().split('\n'));
   return `${lines.join('\n')}\n`;
+}
+
+export function deleteSectionEntry(
+  yamlText: string,
+  sectionTitle: string,
+  entryIndex: number,
+): string {
+  return updateSections(yamlText, (sections) => {
+    const entries = sections[sectionTitle];
+    if (!Array.isArray(entries) || entryIndex < 0 || entryIndex >= entries.length) return;
+    entries.splice(entryIndex, 1);
+  });
+}
+
+export function duplicateSectionEntry(
+  yamlText: string,
+  sectionTitle: string,
+  entryIndex: number,
+): string {
+  return updateSections(yamlText, (sections) => {
+    const entries = sections[sectionTitle];
+    if (!Array.isArray(entries) || entryIndex < 0 || entryIndex >= entries.length) return;
+    entries.splice(entryIndex + 1, 0, deepCloneValue(entries[entryIndex]));
+  });
+}
+
+export function moveSectionEntry(
+  yamlText: string,
+  sectionTitle: string,
+  entryIndex: number,
+  direction: -1 | 1,
+): string {
+  return updateSections(yamlText, (sections) => {
+    const entries = sections[sectionTitle];
+    const nextIndex = entryIndex + direction;
+    if (
+      !Array.isArray(entries) ||
+      entryIndex < 0 ||
+      entryIndex >= entries.length ||
+      nextIndex < 0 ||
+      nextIndex >= entries.length
+    ) return;
+    const [entry] = entries.splice(entryIndex, 1);
+    entries.splice(nextIndex, 0, entry);
+  });
+}
+
+export function moveSectionEntryToIndex(
+  yamlText: string,
+  sectionTitle: string,
+  fromIndex: number,
+  toIndex: number,
+): string {
+  return updateSections(yamlText, (sections) => {
+    const entries = sections[sectionTitle];
+    if (
+      !Array.isArray(entries) ||
+      fromIndex < 0 ||
+      fromIndex >= entries.length ||
+      toIndex < 0 ||
+      toIndex >= entries.length ||
+      fromIndex === toIndex
+    ) return;
+    const [entry] = entries.splice(fromIndex, 1);
+    entries.splice(toIndex, 0, entry);
+  });
+}
+
+export function replaceTextSectionEntries(
+  yamlText: string,
+  sectionTitle: string,
+  value: string,
+): string {
+  return updateSections(yamlText, (sections) => {
+    const entries = sections[sectionTitle];
+    if (!Array.isArray(entries)) return;
+    sections[sectionTitle] = [value];
+  });
+}
+
+const normalSectionTitles = new Set(['projects', 'proyectos', 'research']);
+
+function hasSentenceTerminalPunctuation(value: string): boolean {
+  return value.trim().endsWith('.') || value.trim().endsWith('!') || value.trim().endsWith('?');
+}
+
+function startsWithLowercaseLetter(value: string): boolean {
+  const firstLetter = Array.from(value.trim()).find(
+    (character) => character.toLowerCase() !== character.toUpperCase(),
+  );
+  return Boolean(firstLetter && firstLetter === firstLetter.toLowerCase());
+}
+
+function isNameOnlyEntry(entry: unknown): entry is { name: string } {
+  if (!isRecordLike(entry) || typeof entry.name !== 'string') return false;
+
+  return Object.entries(entry).every(([key, value]) => {
+    if (key === 'name') return true;
+    if (Array.isArray(value)) return value.length === 0;
+    return !stringValue(value).trim();
+  });
+}
+
+function mergeWrappedNormalEntry(entries: unknown[], entryIndex: number): boolean {
+  const previousEntry = entries[entryIndex - 1];
+  const currentEntry = entries[entryIndex];
+  if (!isRecordLike(previousEntry) || !isNameOnlyEntry(currentEntry)) return false;
+  if (!Array.isArray(previousEntry.highlights) || previousEntry.highlights.length === 0) {
+    return false;
+  }
+
+  const lastHighlightIndex = previousEntry.highlights.length - 1;
+  const lastHighlight = stringValue(previousEntry.highlights[lastHighlightIndex]).trim();
+  const continuation = currentEntry.name.trim();
+  const isLikelyContinuation =
+    !hasSentenceTerminalPunctuation(lastHighlight) &&
+    (startsWithLowercaseLetter(continuation) || hasSentenceTerminalPunctuation(continuation));
+
+  if (!lastHighlight || !continuation || !isLikelyContinuation) return false;
+
+  previousEntry.highlights[lastHighlightIndex] = `${lastHighlight} ${continuation}`;
+  entries.splice(entryIndex, 1);
+  return true;
+}
+
+export function normalizeWrappedNormalSections(yamlText: string): string {
+  const data = parseYamlRecord(yamlText);
+  if (!data) return yamlText;
+  const sections = getCvSections(data);
+  if (!sections) return yamlText;
+
+  let changed = false;
+  Object.entries(sections).forEach(([sectionTitle, sectionValue]) => {
+    if (
+      !normalSectionTitles.has(sectionTitle.trim().toLowerCase()) ||
+      !Array.isArray(sectionValue)
+    ) return;
+
+    for (let entryIndex = 1; entryIndex < sectionValue.length; entryIndex++) {
+      if (mergeWrappedNormalEntry(sectionValue, entryIndex)) {
+        changed = true;
+        entryIndex -= 1;
+      }
+    }
+  });
+
+  return changed ? stringifyYamlData(data) : yamlText;
+}
+
+export function renameSection(
+  yamlText: string,
+  currentTitle: string,
+  nextTitle: string,
+): string {
+  const cleanTitle = nextTitle.trim();
+  if (!cleanTitle || cleanTitle === currentTitle) return yamlText;
+
+  return updateSections(yamlText, (sections) => {
+    if (!(currentTitle in sections)) return;
+    const currentValue = sections[currentTitle];
+    const existingValue = sections[cleanTitle];
+    if (Array.isArray(existingValue) && Array.isArray(currentValue)) {
+      sections[cleanTitle] = [...existingValue, ...currentValue];
+    } else {
+      sections[cleanTitle] = currentValue;
+    }
+    delete sections[currentTitle];
+  });
+}
+
+export function deleteSection(yamlText: string, sectionTitle: string): string {
+  return updateSections(yamlText, (sections) => {
+    delete sections[sectionTitle];
+  });
 }
 
 // ─── Experience entries ───────────────────────────────────────────────────────

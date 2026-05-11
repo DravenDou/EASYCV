@@ -8,7 +8,7 @@
  */
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 const STORAGE_KEY = 'rendercv:yaml';
 const DEBOUNCE_MS = 800;
@@ -89,14 +89,15 @@ export function useLocalStorageYaml(fallback: string): UseLocalStorageYamlResult
 
     const saved = loadFromStorage();
     if (saved !== null && saved.trim()) {
-      setYamlState(saved);
-      setRestoredFromStorage(true);
+      const timeoutId = window.setTimeout(() => {
+        setYamlState(saved);
+        setRestoredFromStorage(true);
+      }, 0);
+      return () => window.clearTimeout(timeoutId);
     }
   }, []);
 
-  const setYaml = (nextYaml: string): void => {
-    setYamlState(nextYaml);
-
+  const setYaml = useCallback((nextYaml: string): void => {
     // Debounce the write so rapid keystrokes don't thrash localStorage.
     if (debounceRef.current !== null) {
       clearTimeout(debounceRef.current);
@@ -104,7 +105,7 @@ export function useLocalStorageYaml(fallback: string): UseLocalStorageYamlResult
     debounceRef.current = setTimeout(() => {
       saveToStorage(nextYaml);
     }, DEBOUNCE_MS);
-  };
+  }, []);
 
   // Clear the pending debounce on unmount to avoid stale writes.
   useEffect(() => {
