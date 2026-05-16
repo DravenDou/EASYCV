@@ -6,7 +6,6 @@ from rendercv.exception import RenderCVUserError
 from rendercv.web.models import RenderFormats, RenderRequest, ValidateRequest
 from rendercv.web.service import render_web_request, validate_web_request
 
-
 minimal_yaml = """
 cv:
   name: Jane Doe
@@ -135,16 +134,17 @@ def test_render_web_request_allows_normal_markdown_render() -> None:
         ),
     )
 
-    artifacts = render_web_request(
+    result = render_web_request(
         request,
         max_yaml_bytes=500_000,
         max_artifact_bytes=12_000_000,
     )
 
-    assert len(artifacts) == 1
-    assert artifacts[0].format == "markdown"
-    assert artifacts[0].filename == "cv.md"
-    assert "Jane Doe" in artifacts[0].content
+    assert len(result.artifacts) == 1
+    assert result.artifacts[0].format == "markdown"
+    assert result.artifacts[0].filename == "cv.md"
+    assert "Jane Doe" in result.artifacts[0].content
+    assert result.field_map == []
 
 
 def test_render_web_request_accepts_frontend_sample_yaml() -> None:
@@ -170,12 +170,35 @@ locale:
 """,
     )
 
-    artifacts = render_web_request(
+    result = render_web_request(
         request,
         max_yaml_bytes=500_000,
         max_artifact_bytes=12_000_000,
     )
 
-    assert len(artifacts) == 1
-    assert artifacts[0].format == "markdown"
-    assert "John Doe" in artifacts[0].content
+    assert len(result.artifacts) == 1
+    assert result.artifacts[0].format == "markdown"
+    assert "John Doe" in result.artifacts[0].content
+
+
+def test_render_web_request_builds_pdf_field_map() -> None:
+    request = RenderRequest(
+        main_yaml=minimal_yaml,
+        formats=RenderFormats(
+            include_pdf=True,
+            include_png=False,
+            include_html=False,
+            include_markdown=False,
+            include_typst=False,
+        ),
+        include_field_map=True,
+    )
+
+    result = render_web_request(
+        request,
+        max_yaml_bytes=500_000,
+        max_artifact_bytes=12_000_000,
+    )
+
+    assert any(artifact.format == "pdf" for artifact in result.artifacts)
+    assert any(entry.path == ["cv", "name"] for entry in result.field_map)

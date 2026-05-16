@@ -34,15 +34,16 @@ En otra terminal, instala y levanta el frontend:
 
 ```bash
 cd frontend
-npm install
-npm run dev
+corepack enable
+pnpm install
+pnpm run dev
 ```
 
 Abre [http://localhost:3000](http://localhost:3000). Por defecto, el frontend
 usa el backend en `http://127.0.0.1:8000`. Para cambiarlo:
 
 ```bash
-NEXT_PUBLIC_RENDERCV_API_BASE_URL=http://127.0.0.1:8000 npm run dev
+NEXT_PUBLIC_RENDERCV_API_BASE_URL=http://127.0.0.1:8000 pnpm run dev
 ```
 
 Escribe tu CV o currículum en YAML y ejecuta RenderCV:
@@ -201,7 +202,7 @@ Permite que los agentes de IA creen y editen tu CV. Instala el skill de
 RenderCV:
 
 ```bash
-npx skills add rendercv/rendercv-skill
+pnpm dlx skills add rendercv/rendercv-skill
 ```
 
 Funciona con cualquier agente de IA que soporte el

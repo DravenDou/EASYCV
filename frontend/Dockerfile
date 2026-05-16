@@ -1,8 +1,9 @@
 FROM node:22-alpine AS deps
 
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci
+RUN corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
 
 FROM node:22-alpine AS builder
 
@@ -15,7 +16,7 @@ ARG RENDERCV_INTERNAL_API_BASE_URL
 ENV NEXT_PUBLIC_RENDERCV_API_BASE_URL=${NEXT_PUBLIC_RENDERCV_API_BASE_URL}
 ENV RENDERCV_INTERNAL_API_BASE_URL=${RENDERCV_INTERNAL_API_BASE_URL}
 
-RUN npm run build
+RUN corepack enable && pnpm run build
 
 FROM node:22-alpine AS runner
 

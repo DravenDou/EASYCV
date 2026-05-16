@@ -30,6 +30,7 @@ export type RenderRequestOptions = {
   localeYaml?: string | null;
   settingsYaml?: string | null;
   overrides?: Record<string, string> | null;
+  includeFieldMap?: boolean;
 };
 
 export const defaultRenderFormats: RenderFormats = {
@@ -42,6 +43,7 @@ export const defaultRenderFormats: RenderFormats = {
 
 export type RenderRequestPayload = ValidateRequestPayload & {
   formats: RenderFormats;
+  include_field_map: boolean;
 };
 
 export type ValidateResponsePayload = {
@@ -58,18 +60,59 @@ export type RenderedArtifact = {
   content: string;
 };
 
+export type PdfFieldMapEntry = {
+  path: string[];
+  label: string;
+  text: string;
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  page_width: number;
+  page_height: number;
+};
+
 export type RenderResponsePayload = {
   request_id: string;
   artifacts: RenderedArtifact[];
+  field_map: PdfFieldMapEntry[];
+};
+
+export type ImportedPdfTextBlock = {
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  font_size: number | null;
+};
+
+export type ImportedPdfPage = {
+  page: number;
+  width: number;
+  height: number;
+  blocks: ImportedPdfTextBlock[];
+};
+
+export type ImportedFieldCandidate = {
+  path: string[];
+  label: string;
+  value: string;
+  confidence: number;
+  source: string;
 };
 
 export type PdfImportResponsePayload = {
   request_id: string;
   yaml: string;
+  document: Record<string, unknown>;
   extracted_text: string;
   line_count: number;
   warnings?: string[];
   detected_fields?: string[];
+  field_candidates?: ImportedFieldCandidate[];
+  pages?: ImportedPdfPage[];
   unrecognized_lines?: string[];
 };
 
@@ -116,6 +159,7 @@ function buildRenderRequest(
   return {
     ...buildValidateRequest(mainYaml, options),
     formats,
+    include_field_map: options.includeFieldMap ?? false,
   };
 }
 

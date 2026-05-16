@@ -3,6 +3,7 @@ import io
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from collections.abc import AsyncGenerator, Callable
@@ -39,15 +40,18 @@ logger = logging.getLogger("rendercv.web.api")
 
 request_id_var: ContextVar[str] = ContextVar("request_id", default="-")
 
+type PhotoCacheEntry = tuple[str, bytes, str]
+
 # In-memory TTL cache for temporary photo tokens (30-minute expiry, max 500 entries).
-# Keys are random tokens; values are the stored image bytes.
-photo_token_cache: TTLCache[str, bytes] = TTLCache(maxsize=500, ttl=1800)
+# Keys are random tokens; values are session-bound image bytes and media type.
+photo_token_cache: TTLCache[str, PhotoCacheEntry] = TTLCache(maxsize=500, ttl=1800)
 
 # Accepted MIME types for photo upload.
 ALLOWED_PHOTO_MIME_TYPES: frozenset[str] = frozenset(
     {"image/jpeg", "image/png", "image/webp"}
 )
 MAX_PHOTO_BYTES: int = 2 * 1024 * 1024  # 2 MB
+SESSION_COOKIE_NAME: str = "easycv_session"
 ALLOWED_PDF_MIME_TYPES: frozenset[str] = frozenset(
     {"application/pdf", "application/x-pdf"}
 )
@@ -145,6 +149,30 @@ class RequestIdLoggingMiddleware(BaseHTTPMiddleware):
         response.headers["X-Request-Id"] = rid
         request_id_var.reset(token)
         return response
+
+
+def resolve_easycv_session(request: Request) -> str:
+    """Return the anonymous session id for the current request."""
+    session_id = request.cookies.get(SESSION_COOKIE_NAME)
+    if session_id and re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        session_id,
+    ):
+        return session_id
+    return str(uuid.uuid4())
+
+
+def attach_easycv_session_cookie(response: Response, session_id: str) -> None:
+    """Attach the anonymous EasyCV session cookie to a response."""
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        session_id,
+        max_age=60 * 60 * 24,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path="/",
+    )
 
 
 def create_app(settings: WebApiSettings | None = None) -> FastAPI:
@@ -253,12 +281,17 @@ def create_app(settings: WebApiSettings | None = None) -> FastAPI:
 
     @application.post("/api/v1/render", response_model=RenderResponse, tags=["render"])
     @limiter_render.limit("10/minute")
-    async def render_yaml(request: Request, body: RenderRequest) -> RenderResponse:
+    async def render_yaml(
+        request: Request,
+        body: RenderRequest,
+        response: Response,
+    ) -> RenderResponse:
         """Render selected artifacts from RenderCV payload."""
         request_id = request.headers.get("X-Request-Id") or request_id_var.get()
+        session_id = resolve_easycv_session(request)
 
         try:
-            artifacts = await asyncio.wait_for(
+            result = await asyncio.wait_for(
                 asyncio.to_thread(
                     render_web_request,
                     body,
@@ -267,7 +300,12 @@ def create_app(settings: WebApiSettings | None = None) -> FastAPI:
                 ),
                 timeout=resolved_settings.render_timeout_seconds,
             )
-            return RenderResponse(request_id=request_id, artifacts=artifacts)
+            attach_easycv_session_cookie(response, session_id)
+            return RenderResponse(
+                request_id=request_id,
+                artifacts=result.artifacts,
+                field_map=result.field_map,
+            )
         except RenderCVUserValidationError as error:
             validation_errors = convert_validation_errors(error.validation_errors)
             raise build_http_exception(
@@ -312,7 +350,11 @@ def create_app(settings: WebApiSettings | None = None) -> FastAPI:
             ) from error
 
     @application.post("/api/v1/upload-photo", response_model=PhotoUploadResponse, tags=["media"])
-    async def upload_photo(request: Request, file: UploadFile) -> PhotoUploadResponse:
+    async def upload_photo(
+        request: Request,
+        file: UploadFile,
+        response: Response,
+    ) -> PhotoUploadResponse:
         """Accept a profile photo, validate it, and return a short-lived token URL.
 
         Why:
@@ -326,6 +368,7 @@ def create_app(settings: WebApiSettings | None = None) -> FastAPI:
             PhotoUploadResponse with a token URL and expiry timestamp.
         """
         request_id = request.headers.get("X-Request-Id") or request_id_var.get()
+        session_id = resolve_easycv_session(request)
 
         content_type = file.content_type or ""
         if content_type not in ALLOWED_PHOTO_MIME_TYPES:
@@ -374,8 +417,9 @@ def create_app(settings: WebApiSettings | None = None) -> FastAPI:
             logger.warning("Pillow not installed; skipping photo dimension validation.")
 
         token = str(uuid.uuid4())
-        photo_token_cache[token] = image_bytes
+        photo_token_cache[token] = (session_id, image_bytes, content_type)
         expires_at = int(time.time()) + 1800
+        attach_easycv_session_cookie(response, session_id)
 
         return PhotoUploadResponse(
             request_id=request_id,
@@ -389,7 +433,11 @@ def create_app(settings: WebApiSettings | None = None) -> FastAPI:
         response_model=PdfImportResponse,
         tags=["media"],
     )
-    async def import_pdf(request: Request, file: UploadFile) -> PdfImportResponse:
+    async def import_pdf(
+        request: Request,
+        file: UploadFile,
+        response: Response,
+    ) -> PdfImportResponse:
         """Convert an uploaded PDF into editable RenderCV YAML.
 
         Why:
@@ -398,6 +446,7 @@ def create_app(settings: WebApiSettings | None = None) -> FastAPI:
             without AI, giving the frontend an immediate editable draft.
         """
         request_id = request.headers.get("X-Request-Id") or request_id_var.get()
+        session_id = resolve_easycv_session(request)
         content_type = file.content_type or ""
         filename = file.filename or ""
         if (
@@ -432,13 +481,17 @@ def create_app(settings: WebApiSettings | None = None) -> FastAPI:
                 asyncio.to_thread(convert_pdf_to_yaml, pdf_bytes),
                 timeout=resolved_settings.validate_timeout_seconds,
             )
+            attach_easycv_session_cookie(response, session_id)
             return PdfImportResponse(
                 request_id=request_id,
                 yaml=result.yaml,
+                document=result.document,
                 extracted_text=result.extracted_text,
                 line_count=result.line_count,
                 warnings=result.warnings,
                 detected_fields=result.detected_fields,
+                field_candidates=result.field_candidates,
+                pages=result.pages,
                 unrecognized_lines=result.unrecognized_lines,
             )
         except RenderCVUserError as error:
@@ -461,12 +514,15 @@ def create_app(settings: WebApiSettings | None = None) -> FastAPI:
             ) from error
 
     @application.get("/api/v1/photo/{token}", tags=["media"])
-    async def serve_photo(token: str) -> Response:
+    async def serve_photo(request: Request, token: str) -> Response:
         """Serve a previously uploaded photo by its token."""
-        image_bytes = photo_token_cache.get(token)
-        if image_bytes is None:
+        entry = photo_token_cache.get(token)
+        if entry is None:
             raise HTTPException(status_code=404, detail="Photo token not found or expired.")
-        return Response(content=image_bytes, media_type="image/jpeg")
+        session_id, image_bytes, media_type = entry
+        if session_id != resolve_easycv_session(request):
+            raise HTTPException(status_code=404, detail="Photo token not found or expired.")
+        return Response(content=image_bytes, media_type=media_type)
 
     @application.post("/api/v1/render-stream", tags=["render"])
     @limiter_render.limit("10/minute")
@@ -497,7 +553,7 @@ def create_app(settings: WebApiSettings | None = None) -> FastAPI:
 
                 yield send_event("building_model", 0.3, "Construyendo modelo...")
 
-                artifacts = await asyncio.wait_for(
+                result = await asyncio.wait_for(
                     asyncio.to_thread(
                         render_web_request,
                         body,
@@ -510,13 +566,20 @@ def create_app(settings: WebApiSettings | None = None) -> FastAPI:
                 yield send_event("compiling", 0.75, "Compilando PDF...")
                 await asyncio.sleep(0)
 
-                result = RenderResponse(request_id=request_id, artifacts=artifacts)
+                response_payload = RenderResponse(
+                    request_id=request_id,
+                    artifacts=result.artifacts,
+                    field_map=result.field_map,
+                )
                 done_payload = json.dumps(
                     {
                         "stage": "done",
                         "progress": 1.0,
                         "request_id": request_id,
-                        "artifacts": [a.model_dump() for a in result.artifacts],
+                        "artifacts": [a.model_dump() for a in response_payload.artifacts],
+                        "field_map": [
+                            entry.model_dump() for entry in response_payload.field_map
+                        ],
                     }
                 )
                 yield f"data: {done_payload}\n\n"

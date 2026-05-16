@@ -1,25 +1,21 @@
 'use client';
 
 import { ScrollShadow } from '@heroui/react';
-import { ClipboardCheck, ListTree, Palette, ShieldCheck, TerminalSquare } from 'lucide-react';
+import { ListTree, Palette, TerminalSquare } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import type { ReactNode } from 'react';
 
 import type {
   EditorTabId,
   EntryTemplateId,
-  ExperienceEntryForm,
   PersonalFieldKey,
   RenderFormatSelection,
+  CvFieldPath,
   SocialNetworkKey,
   ThemeId,
 } from '@/lib/types';
 import { WorkspacePanel } from './ui-primitives';
 import { YamlEditor } from './yaml-editor';
-import { PersonalInfoForm } from './personal-info-form';
-import { SocialNetworksForm } from './social-networks-form';
-import { ExperienceEntriesForm } from './experience-entries-form';
-import { SectionsBuilder } from './sections-builder';
 import { DesignPanel } from './design-panel';
 import { CvListEditor } from './cv-list-editor';
 
@@ -68,7 +64,7 @@ function EditorTabButton({
   return (
     <button
       aria-selected={isSelected}
-      className={`relative flex h-9 items-center overflow-hidden rounded-full px-3 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
+      className={`relative flex h-8 items-center overflow-hidden rounded-full px-2.5 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
         isSelected
           ? 'text-accent-foreground'
           : 'text-muted hover:bg-surface-secondary hover:text-foreground'
@@ -96,13 +92,13 @@ export function EditorPanel({
   formatSelection,
   customDesignYaml,
   isYamlEnabled,
+  selectedFieldPath,
   selectedTab,
   canUndo,
   canRedo,
   onYamlChange,
   onPersonalFieldChange,
   onSocialFieldChange,
-  onExperienceEntryChange,
   onSectionEntryChange,
   onInsertEntry,
   onDeleteEntry,
@@ -125,17 +121,13 @@ export function EditorPanel({
   formatSelection: RenderFormatSelection;
   customDesignYaml: string;
   isYamlEnabled: boolean;
+  selectedFieldPath: CvFieldPath | null;
   selectedTab: EditorTabId;
   canUndo: boolean;
   canRedo: boolean;
   onYamlChange: (value: string) => void;
   onPersonalFieldChange: (field: PersonalFieldKey, value: string) => void;
   onSocialFieldChange: (network: SocialNetworkKey, value: string) => void;
-  onExperienceEntryChange: (
-    sectionTitle: string,
-    index: number,
-    updates: Partial<Omit<ExperienceEntryForm, 'sectionTitle' | 'index'>>,
-  ) => void;
   onSectionEntryChange: (sectionTitle: string, entryIndex: number, fieldKey: string, value: string) => void;
   onInsertEntry: (sectionTitle: string, templateId: EntryTemplateId) => void;
   onDeleteEntry: (sectionTitle: string, entryIndex: number) => void;
@@ -174,6 +166,7 @@ export function EditorPanel({
               onSectionEntryChange={onSectionEntryChange}
               onSocialFieldChange={onSocialFieldChange}
               yamlText={yamlText}
+              selectedFieldPath={selectedFieldPath}
             />
           </ScrollShadow>
         </AnimatedTabPanel>
@@ -194,69 +187,6 @@ export function EditorPanel({
             yamlLineCount={yamlLineCount}
             yamlText={yamlText}
           />
-        </AnimatedTabPanel>
-      );
-    }
-
-    if (activeTab === 'formulario') {
-      return (
-        <AnimatedTabPanel
-          className="min-h-0 flex-1 overflow-hidden p-0"
-          id="formulario"
-          key="formulario"
-        >
-          <ScrollShadow className="max-h-[720px] p-3 sm:p-4 xl:h-full xl:max-h-none" hideScrollBar>
-            <div className="space-y-6 pb-4">
-              <section aria-labelledby="personal-info-heading" className="space-y-4">
-                <div>
-                  <h3 className="text-sm font-semibold text-foreground" id="personal-info-heading">
-                    Información personal
-                  </h3>
-                  <p className="mt-1 text-sm leading-6 text-muted">
-                    Datos visibles en la cabecera del CV.
-                  </p>
-                </div>
-                <PersonalInfoForm yamlText={yamlText} onFieldChange={onPersonalFieldChange} />
-              </section>
-
-              <section aria-labelledby="social-info-heading" className="space-y-4">
-                <div>
-                  <h3 className="text-sm font-semibold text-foreground" id="social-info-heading">
-                    Redes profesionales
-                  </h3>
-                </div>
-                <SocialNetworksForm yamlText={yamlText} onSocialFieldChange={onSocialFieldChange} />
-              </section>
-
-              <section aria-labelledby="experience-info-heading">
-                <ExperienceEntriesForm
-                  onExperienceEntryChange={onExperienceEntryChange}
-                  onInsertEntry={onInsertEntry}
-                  yamlText={yamlText}
-                />
-              </section>
-
-              <section aria-labelledby="sections-info-heading">
-                <SectionsBuilder
-                  onInsertEntry={onInsertEntry}
-                  onSectionEntryChange={onSectionEntryChange}
-                  yamlText={yamlText}
-                />
-              </section>
-
-              <div className="rounded-[20px] border border-border bg-surface-secondary p-4">
-                <div className="flex items-center gap-3">
-                  <ShieldCheck aria-hidden="true" className="size-5 text-success" />
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">Estructura compatible</p>
-                    <p className="mt-1 text-sm leading-6 text-muted">
-                      Contenido, diseño, idioma y salida en capas separadas.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </ScrollShadow>
         </AnimatedTabPanel>
       );
     }
@@ -289,8 +219,7 @@ export function EditorPanel({
         </span>
       }
       className="min-h-[640px] overflow-hidden xl:h-[calc(100vh-6rem)] xl:min-h-[680px]"
-      eyebrow="Área principal"
-      title="Contenido del CV"
+      title="Editor"
     >
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="border-b border-separator px-4 pt-3">
@@ -305,7 +234,7 @@ export function EditorPanel({
                 onSelect={onTabChange}
               >
                 <ListTree aria-hidden="true" className="mr-2 size-4" />
-                Lista
+                CV
               </EditorTabButton>
               {isYamlEnabled ? (
                 <EditorTabButton
@@ -318,20 +247,12 @@ export function EditorPanel({
                 </EditorTabButton>
               ) : null}
               <EditorTabButton
-                id="formulario"
-                isSelected={activeTab === 'formulario'}
-                onSelect={onTabChange}
-              >
-                <ClipboardCheck aria-hidden="true" className="mr-2 size-4" />
-                Formulario
-              </EditorTabButton>
-              <EditorTabButton
                 id="diseno"
                 isSelected={activeTab === 'diseno'}
                 onSelect={onTabChange}
               >
                 <Palette aria-hidden="true" className="mr-2 size-4" />
-                Diseño
+                Design
               </EditorTabButton>
           </div>
         </div>

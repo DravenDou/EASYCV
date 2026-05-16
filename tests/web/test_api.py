@@ -4,12 +4,15 @@ These tests use FastAPI's TestClient to exercise the full request/response
 cycle including middleware, error handlers and rate-limiting configuration.
 """
 
+import io
+import struct
+import zlib
+
 import pytest
 from fastapi.testclient import TestClient
 
 from rendercv.web.api import WebApiSettings, create_app
 from rendercv.web.models import RenderFormats
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -25,8 +28,9 @@ def client() -> TestClient:
         max_artifact_bytes=12_000_000,
         validate_timeout_seconds=30,
         render_timeout_seconds=120,
+        max_pdf_bytes=8_000_000,
     )
-    return TestClient(create_app(settings))
+    return TestClient(create_app(settings), base_url="https://testserver")
 
 
 minimal_yaml = """
@@ -38,6 +42,23 @@ cv:
 """
 
 oversized_yaml = "cv:\n  name: x\n" + ("  # padding\n" * 50_000)
+
+
+def build_png_bytes(width: int = 120, height: int = 120) -> bytes:
+    """Build a small valid RGB PNG for upload tests without Pillow."""
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        checksum = zlib.crc32(kind + data) & 0xFFFFFFFF
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", checksum)
+
+    scanline = b"\x00" + (b"\x22\x33\x44" * width)
+    raw = scanline * height
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +195,29 @@ def test_render_markdown_returns_artifact(client: TestClient) -> None:
     artifact = body["artifacts"][0]
     assert artifact["format"] == "markdown"
     assert "Jane Doe" in artifact["content"]
+    assert body["field_map"] == []
+
+
+def test_render_pdf_can_include_field_map(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/render",
+        json={
+            "main_yaml": minimal_yaml,
+            "formats": {
+                "include_pdf": True,
+                "include_png": False,
+                "include_html": False,
+                "include_markdown": False,
+                "include_typst": False,
+            },
+            "include_field_map": True,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["artifacts"][0]["format"] == "pdf"
+    assert any(entry["path"] == ["cv", "name"] for entry in body["field_map"])
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +274,7 @@ def test_render_all_formats_false_returns_empty_artifacts(client: TestClient) ->
     assert response.status_code == 200
     body = response.json()
     assert body["artifacts"] == []
+    assert body["field_map"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -251,3 +296,24 @@ cv:
     )
     # Either 200 (soft validation errors in render) or 422 — both are acceptable
     assert response.status_code in (200, 422)
+
+
+# ---------------------------------------------------------------------------
+# /api/v1/upload-photo — session isolation
+# ---------------------------------------------------------------------------
+
+
+def test_photo_tokens_are_bound_to_anonymous_session(client: TestClient) -> None:
+    buffer = io.BytesIO(build_png_bytes())
+
+    upload_response = client.post(
+        "/api/v1/upload-photo",
+        files={"file": ("photo.png", buffer.getvalue(), "image/png")},
+    )
+
+    assert upload_response.status_code == 200
+    photo_url = upload_response.json()["photo_url"]
+    assert client.get(photo_url).status_code == 200
+
+    other_client = TestClient(client.app, base_url="https://testserver")
+    assert other_client.get(photo_url).status_code == 404

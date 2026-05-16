@@ -7,6 +7,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clearStoredYaml, useLocalStorageYaml } from '@/lib/use-local-storage-yaml';
 import { useEditorState } from '@/lib/use-editor-state';
 import {
+  cvDocumentToYaml,
+  updateYamlAtPath,
+} from '@/lib/cv-document';
+import {
   RenderCvApiError,
   createRendercvClient,
   type RenderFormats,
@@ -21,18 +25,19 @@ import type {
   ThemeId,
   ValidationStatus,
   RenderStatus,
-  ExperienceEntryForm,
   PersonalFieldKey,
   SocialNetworkKey,
   EntryTemplateId,
   EditorTabId,
   PdfImportReview,
   PreviewFitMode,
+  CvDocument,
+  CvFieldPath,
+  PdfEditorSelection,
 } from '@/lib/types';
 import {
   updateCvValue,
   updateSocialUsername,
-  updateExperienceEntry,
   updateSectionEntryField,
   insertEntryTemplate,
   deleteSectionEntry,
@@ -42,6 +47,7 @@ import {
   replaceTextSectionEntries,
   renameSection,
   deleteSection,
+  translateSectionTitlesForLanguage,
 } from '@/lib/yaml-helpers';
 
 import { Sidebar } from './components/sidebar';
@@ -214,6 +220,16 @@ function ImportReviewPanel({
             {field}
           </Chip>
         ))}
+        {review.pages.length > 0 ? (
+          <Chip color="default" size="sm" variant="soft">
+            {review.pages.length} páginas con texto
+          </Chip>
+        ) : null}
+        {review.fieldCandidates.length > 0 ? (
+          <Chip color="default" size="sm" variant="soft">
+            {review.fieldCandidates.length} campos editables
+          </Chip>
+        ) : null}
       </div>
       {review.warnings.length > 0 || review.unrecognizedLines.length > 0 ? (
         <div className="mt-3 grid gap-2 text-sm leading-5 text-muted">
@@ -235,7 +251,7 @@ function ImportReviewPanel({
 
 export default function Home() {
   // ── Persistence + undo/redo ──────────────────────────────────────────────
-  const { yaml: persistedYaml, setYaml: persistYaml, restoredFromStorage } = useLocalStorageYaml(FALLBACK_YAML);
+  const { yaml: persistedYaml, setYaml: persistYaml } = useLocalStorageYaml(FALLBACK_YAML);
   const editor = useEditorState(persistedYaml);
   const { yamlText, canUndo, canRedo, setYaml, setYamlSkipHistory, undo, redo } = editor;
 
@@ -245,8 +261,7 @@ export default function Home() {
   }, [yamlText, persistYaml]);
 
   // ── UI state ─────────────────────────────────────────────────────────────
-  const [showRestoredBanner, setShowRestoredBanner] = useState(false);
-  const [validationStatus, setValidationStatus] = useState<ValidationStatus>('idle');
+  const [, setValidationStatus] = useState<ValidationStatus>('idle');
   const [renderResult, setRenderResult] = useState<RenderResponsePayload | null>(null);
   const [renderStatus, setRenderStatus] = useState<RenderStatus>('idle');
   const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([]);
@@ -255,11 +270,12 @@ export default function Home() {
   const [previewScale, setPreviewScale] = useState(0.88);
   const [previewFitMode, setPreviewFitMode] = useState<PreviewFitMode>('custom');
   const [editorTab, setEditorTab] = useState<EditorTabId>('lista');
+  const [selectedPdfField, setSelectedPdfField] = useState<PdfEditorSelection>(null);
   const [selectedThemeId, setSelectedThemeId] = useState<ThemeId>('classic');
   const [formatSelection, setFormatSelection] = useState<RenderFormatSelection>(DEFAULT_FORMAT_SELECTION);
   const [customDesignYaml, setCustomDesignYaml] = useState('');
   const [cvLanguage, setCvLanguage] = useState<CvLanguage>('spanish');
-  const [isYamlEnabled, setIsYamlEnabled] = useState(true);
+  const [isYamlEnabled, setIsYamlEnabled] = useState(false);
   const [importedPdf, setImportedPdf] = useState<ImportedPdf | null>(null);
   const [importReview, setImportReview] = useState<PdfImportReview | null>(null);
 
@@ -278,13 +294,6 @@ export default function Home() {
     }, 0);
     return () => window.clearTimeout(timeoutId);
   }, [setYamlSkipHistory, yamlText]);
-
-  // ── Banner ───────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!restoredFromStorage) return;
-    const timeoutId = window.setTimeout(() => setShowRestoredBanner(true), 0);
-    return () => window.clearTimeout(timeoutId);
-  }, [restoredFromStorage]);
 
   useEffect(() => {
     const animationFrameId = window.requestAnimationFrame(() => {
@@ -311,6 +320,7 @@ export default function Home() {
   const renderOptions = useMemo(() => ({
     designYaml: customDesignYaml || `design:\n  theme: ${selectedThemeId}\n`,
     localeYaml: buildLocaleYaml(cvLanguage),
+    includeFieldMap: true,
   }), [customDesignYaml, selectedThemeId, cvLanguage]);
 
   // ── YAML mutators ─────────────────────────────────────────────────────────
@@ -347,14 +357,6 @@ export default function Home() {
 
   const updateSocialField = useCallback((network: SocialNetworkKey, value: string): void => {
     updateYamlFromForm(updateSocialUsername(yamlText, network, value));
-  }, [yamlText, updateYamlFromForm]);
-
-  const updateExperienceField = useCallback((
-    sectionTitle: string,
-    index: number,
-    updates: Partial<Omit<ExperienceEntryForm, 'sectionTitle' | 'index'>>,
-  ): void => {
-    updateYamlFromForm(updateExperienceEntry(yamlText, sectionTitle, index, updates));
   }, [yamlText, updateYamlFromForm]);
 
   const updateSectionField = useCallback((
@@ -406,12 +408,36 @@ export default function Home() {
     setEditorTab('yaml');
   }, []);
 
+  const selectPdfField = useCallback((selection: PdfEditorSelection): void => {
+    setSelectedPdfField(selection);
+    setEditorTab('lista');
+    if (selection) {
+      setSampleStatus(`Campo seleccionado: ${selection.label}`);
+    }
+  }, []);
+
+  const updatePdfField = useCallback((path: CvFieldPath, value: string): void => {
+    const nextYaml = updateYamlAtPath(yamlText, path, value);
+    if (nextYaml === yamlText) {
+      setSampleStatus('No se pudo actualizar ese campo; revisa el YAML avanzado.');
+      openYamlTab();
+      return;
+    }
+    updateYamlFromForm(nextYaml);
+    setSampleStatus('Campo actualizado desde el PDF');
+  }, [openYamlTab, updateYamlFromForm, yamlText]);
+
   const handleYamlVisibilityChange = useCallback((visible: boolean): void => {
     setIsYamlEnabled(visible);
     if (!visible) {
       setEditorTab((tab) => (tab === 'yaml' ? 'lista' : tab));
     }
   }, []);
+
+  const handleLanguageChange = useCallback((nextLanguage: CvLanguage): void => {
+    setCvLanguage(nextLanguage);
+    updateYamlFromForm(translateSectionTitlesForLanguage(yamlText, nextLanguage));
+  }, [updateYamlFromForm, yamlText]);
 
   const applyTheme = useCallback((theme: ThemeId): void => {
     changeSourceRef.current = 'form';
@@ -452,7 +478,9 @@ export default function Home() {
         reader.readAsDataURL(file);
       });
 
-      const normalizedYaml = normalizeWrappedNormalSections(response.yaml);
+      const normalizedYaml = normalizeWrappedNormalSections(
+        response.yaml || cvDocumentToYaml(response.document as CvDocument),
+      );
       changeSourceRef.current = 'yaml';
       setYamlSkipHistory(normalizedYaml);
       setRenderResult(null);
@@ -466,6 +494,8 @@ export default function Home() {
         fileName: file.name,
         warnings: response.warnings ?? [],
         detectedFields: response.detected_fields ?? [],
+        fieldCandidates: response.field_candidates ?? [],
+        pages: response.pages ?? [],
         unrecognizedLines: response.unrecognized_lines ?? [],
       });
       setValidationStatus('idle');
@@ -492,7 +522,6 @@ export default function Home() {
       setImportedPdf(null);
       setImportReview(null);
       clearStoredYaml();
-      setShowRestoredBanner(false);
     } catch {
       setYamlSkipHistory(FALLBACK_YAML);
       setSampleStatus('Muestra integrada cargada');
@@ -569,40 +598,6 @@ export default function Home() {
   // ─── JSX ─────────────────────────────────────────────────────────────────
   return (
     <main className="min-h-dvh overflow-x-hidden bg-background text-foreground">
-      {/* Restored-draft banner */}
-      {showRestoredBanner ? (
-        <div
-          aria-live="polite"
-          className="flex items-center justify-between gap-3 border-b border-separator bg-accent/10 px-4 py-2.5 text-sm"
-          role="status"
-        >
-          <span className="font-medium text-accent">
-            ✦ Borrador anterior restaurado automáticamente.
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              className="rounded-full px-3 py-1 text-xs font-semibold text-muted transition-colors hover:bg-surface-tertiary hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-              type="button"
-              onClick={() => {
-                clearStoredYaml();
-                setYamlSkipHistory(FALLBACK_YAML);
-                setShowRestoredBanner(false);
-              }}
-            >
-              Descartar borrador
-            </button>
-            <button
-              aria-label="Cerrar aviso"
-              className="rounded-full p-1 text-muted transition-colors hover:bg-surface-tertiary hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-              type="button"
-              onClick={() => setShowRestoredBanner(false)}
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-      ) : null}
-
       <div className="flex min-h-dvh">
         <Sidebar
           sampleStatus={sampleStatus}
@@ -616,11 +611,9 @@ export default function Home() {
             canUndo={canUndo}
             formatSelection={formatSelection}
             language={cvLanguage}
-            renderStatus={renderStatus}
-            validationStatus={validationStatus}
             onCopyYaml={() => { void handleCopyYaml(); }}
             onFormatChange={setFormatSelection}
-            onLanguageChange={setCvLanguage}
+            onLanguageChange={handleLanguageChange}
             onLoadSample={() => { void loadSample(); }}
             onRedo={redo}
             onUndo={undo}
@@ -643,6 +636,7 @@ export default function Home() {
                 customDesignYaml={customDesignYaml}
                 formatSelection={formatSelection}
                 isYamlEnabled={isYamlEnabled}
+                selectedFieldPath={selectedPdfField?.path ?? null}
                 selectedTab={editorTab}
                 selectedThemeId={selectedThemeId}
                 yamlLineCount={yamlLineCount}
@@ -652,7 +646,6 @@ export default function Home() {
                 onDeleteEntry={deleteEntry}
                 onDeleteSection={deleteCvSection}
                 onDuplicateEntry={duplicateEntry}
-                onExperienceEntryChange={updateExperienceField}
                 onFormatChange={setFormatSelection}
                 onInsertEntry={insertEntry}
                 onPersonalFieldChange={updatePersonalField}
@@ -673,14 +666,18 @@ export default function Home() {
                 importedPdf={importedPdf}
                 pdfArtifact={pdfArtifact}
                 pngArtifacts={pngArtifacts}
+                fieldMap={renderResult?.field_map ?? []}
                 previewFitMode={previewFitMode}
                 previewScale={previewScale}
                 profile={previewProfile}
                 renderStatus={renderStatus}
+                selectedPdfField={selectedPdfField}
                 onClearImportedPdf={() => {
                   setImportedPdf(null);
                   setImportReview(null);
                 }}
+                onFieldEdit={updatePdfField}
+                onFieldSelect={selectPdfField}
                 onPreviewFitModeChange={setPreviewFitMode}
                 onPreviewScaleChange={setPreviewScale}
               />

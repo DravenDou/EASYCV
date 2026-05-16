@@ -26,20 +26,20 @@ export function ThemeToggle() {
       >
         {({ isSelected }) => (
           <Switch.Control
-            className={`h-9 w-16 rounded-full border border-border-tertiary transition-colors ${
+            className={`h-8 w-14 rounded-full border border-border-tertiary transition-colors ${
               isSelected ? 'bg-accent' : 'bg-surface-tertiary'
             }`}
           >
             <Switch.Thumb
-              className={`size-8 rounded-full transition-[margin,transform] ${
-                isSelected ? 'ms-7 bg-accent-foreground' : 'ms-0.5 bg-foreground'
+              className={`size-7 rounded-full transition-[margin,transform] ${
+                isSelected ? 'ms-6 bg-accent-foreground' : 'ms-0.5 bg-foreground'
               }`}
             >
               <Switch.Icon>
                 {isSelected ? (
-                  <Moon aria-hidden="true" className="size-4 text-accent" />
+                  <Moon aria-hidden="true" className="size-3.5 text-accent" />
                 ) : (
-                  <Sun aria-hidden="true" className="size-4 text-background" />
+                  <Sun aria-hidden="true" className="size-3.5 text-background" />
                 )}
               </Switch.Icon>
             </Switch.Thumb>
@@ -69,12 +69,12 @@ export function WorkspacePanel({
 }) {
   return (
     <section
-      className={`animate-panel-in flex min-w-0 flex-col rounded-[20px] border border-border bg-surface shadow-surface ${className}`}
+      className={`animate-panel-in flex min-w-0 flex-col rounded-[12px] border border-border bg-surface shadow-surface ${className}`}
     >
-      <header className="flex min-h-14 flex-col justify-between gap-3 border-b border-separator px-4 py-3 sm:flex-row sm:items-center">
+      <header className="flex min-h-12 flex-col justify-between gap-2 border-b border-separator px-4 py-2.5 sm:flex-row sm:items-center">
         <div className="min-w-0">
           {eyebrow ? <p className="text-xs font-semibold text-muted">{eyebrow}</p> : null}
-          <h2 className="mt-1 truncate text-base font-semibold text-foreground">{title}</h2>
+          <h2 className={eyebrow ? 'mt-0.5 truncate text-base font-semibold text-foreground' : 'truncate text-base font-semibold text-foreground'}>{title}</h2>
         </div>
         {actions ? <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">{actions}</div> : null}
       </header>

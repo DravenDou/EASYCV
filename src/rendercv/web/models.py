@@ -67,6 +67,7 @@ class RenderRequest(ValidateRequest):
     """Input payload for render endpoint."""
 
     formats: RenderFormats = pydantic.Field(default_factory=RenderFormats)
+    include_field_map: bool = pydantic.Field(default=False)
 
 
 class ValidateResponse(BaseModelWithoutExtraKeys):
@@ -87,11 +88,57 @@ class RenderedArtifact(BaseModelWithoutExtraKeys):
     content: str
 
 
+class PdfFieldMapEntry(BaseModelWithoutExtraKeys):
+    """Editable field location in a rendered PDF page."""
+
+    path: list[str]
+    label: str
+    text: str
+    page: int
+    x: float
+    y: float
+    width: float
+    height: float
+    page_width: float
+    page_height: float
+
+
 class RenderResponse(BaseModelWithoutExtraKeys):
     """Render result containing requested artifacts."""
 
     request_id: str
     artifacts: list[RenderedArtifact]
+    field_map: list[PdfFieldMapEntry] = pydantic.Field(default_factory=list)
+
+
+class ImportedPdfTextBlock(BaseModelWithoutExtraKeys):
+    """Selectable text block extracted from an imported PDF page."""
+
+    text: str
+    x: float
+    y: float
+    width: float
+    height: float
+    font_size: float | None = pydantic.Field(default=None)
+
+
+class ImportedPdfPage(BaseModelWithoutExtraKeys):
+    """Page dimensions and selectable text blocks from an imported PDF."""
+
+    page: int
+    width: float
+    height: float
+    blocks: list[ImportedPdfTextBlock] = pydantic.Field(default_factory=list)
+
+
+class ImportedFieldCandidate(BaseModelWithoutExtraKeys):
+    """A structured CV field inferred from an imported PDF."""
+
+    path: list[str]
+    label: str
+    value: str
+    confidence: float
+    source: str
 
 
 class PdfImportResponse(BaseModelWithoutExtraKeys):
@@ -106,10 +153,13 @@ class PdfImportResponse(BaseModelWithoutExtraKeys):
 
     request_id: str
     yaml: str
+    document: dict[str, object] = pydantic.Field(default_factory=dict)
     extracted_text: str
     line_count: int
     warnings: list[str] = pydantic.Field(default_factory=list)
     detected_fields: list[str] = pydantic.Field(default_factory=list)
+    field_candidates: list[ImportedFieldCandidate] = pydantic.Field(default_factory=list)
+    pages: list[ImportedPdfPage] = pydantic.Field(default_factory=list)
     unrecognized_lines: list[str] = pydantic.Field(default_factory=list)
 
 

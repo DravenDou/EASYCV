@@ -1,8 +1,12 @@
 import base64
-from collections.abc import Mapping
 import pathlib
+import re
 import tempfile
+from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
+
+import fitz
 
 from rendercv.exception import (
     RenderCVUserError,
@@ -20,13 +24,22 @@ from rendercv.schema.rendercv_model_builder import (
 
 from .models import (
     ArtifactFormat,
-    RenderRequest,
+    PdfFieldMapEntry,
     RenderedArtifact,
+    RenderRequest,
     ValidateRequest,
     ValidationIssue,
 )
 
 type RawYamlMapping = Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class RenderWebResult:
+    """Artifacts and editable PDF field metadata from one render request."""
+
+    artifacts: list[RenderedArtifact]
+    field_map: list[PdfFieldMapEntry]
 
 blocked_web_yaml_paths: tuple[tuple[str, ...], ...] = (
     ("cv", "photo"),
@@ -341,11 +354,193 @@ def build_binary_artifact(
     )
 
 
+def normalize_match_text(value: str) -> str:
+    """Normalize text for PDF field matching.
+
+    Args:
+        value: Raw source or extracted PDF text.
+
+    Returns:
+        Whitespace-normalized text.
+    """
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def collect_field_map_candidates(
+    yaml_text: str,
+) -> list[tuple[list[str], str, str]]:
+    """Collect candidate model values that can be edited from PDF overlays.
+
+    Args:
+        yaml_text: Main RenderCV YAML text.
+
+    Returns:
+        Tuples of model path, label, and value.
+    """
+    mapping = read_yaml_with_validation_errors(yaml_text, "main_yaml_file")
+    cv = mapping.get("cv")
+    if not isinstance(cv, Mapping):
+        return []
+
+    candidates: list[tuple[list[str], str, str]] = []
+    labels: dict[str, str] = {
+        "name": "Nombre",
+        "headline": "Titular",
+        "location": "Ubicación",
+        "email": "Correo",
+        "phone": "Teléfono",
+        "website": "Sitio web",
+    }
+    for field, label in labels.items():
+        value = cv.get(field)
+        if isinstance(value, str) and value.strip():
+            candidates.append((["cv", field], label, value))
+
+    social_networks = cv.get("social_networks")
+    if isinstance(social_networks, list):
+        for index, network in enumerate(social_networks):
+            if not isinstance(network, Mapping):
+                continue
+            username = network.get("username")
+            network_name = network.get("network")
+            if isinstance(username, str) and username.strip():
+                candidates.append(
+                    (
+                        ["cv", "social_networks", str(index), "username"],
+                        str(network_name or "Red social"),
+                        username,
+                    )
+                )
+
+    sections = cv.get("sections")
+    if isinstance(sections, Mapping):
+        for section_title, entries in sections.items():
+            if not isinstance(section_title, str) or not isinstance(entries, list):
+                continue
+            for entry_index, entry in enumerate(entries):
+                base_path = ["cv", "sections", section_title, str(entry_index)]
+                if isinstance(entry, str) and entry.strip():
+                    candidates.append((base_path, section_title, entry))
+                    continue
+                if not isinstance(entry, Mapping):
+                    continue
+                for field, value in entry.items():
+                    if isinstance(value, str) and value.strip():
+                        candidates.append(
+                            ([*base_path, str(field)], f"{section_title} · {field}", value)
+                        )
+                    elif field == "highlights" and isinstance(value, list):
+                        for highlight_index, highlight in enumerate(value):
+                            if isinstance(highlight, str) and highlight.strip():
+                                candidates.append(
+                                    (
+                                        [
+                                            *base_path,
+                                            "highlights",
+                                            str(highlight_index),
+                                        ],
+                                        f"{section_title} · logro",
+                                        highlight,
+                                    )
+                                )
+
+    return candidates
+
+
+def candidate_matches_line(candidate_text: str, line_text: str) -> bool:
+    """Return true if a model value plausibly maps to a PDF line.
+
+    Args:
+        candidate_text: Normalized source field value.
+        line_text: Normalized extracted PDF line.
+
+    Returns:
+        Whether the line can be used as an editable overlay target.
+    """
+    candidate = normalize_match_text(candidate_text)
+    line = normalize_match_text(line_text)
+    if not candidate or not line:
+        return False
+    if candidate == line:
+        return True
+    return len(candidate) >= 8 and (candidate in line or line in candidate)
+
+
+def build_pdf_field_map(
+    *,
+    pdf_path: pathlib.Path,
+    yaml_text: str,
+) -> list[PdfFieldMapEntry]:
+    """Extract editable field positions from a rendered PDF.
+
+    Args:
+        pdf_path: Rendered PDF path.
+        yaml_text: Main RenderCV YAML text used for rendering.
+
+    Returns:
+        Editable field map entries with PDF coordinates.
+    """
+    candidates = collect_field_map_candidates(yaml_text)
+    if not candidates or not pdf_path.exists():
+        return []
+
+    field_map: list[PdfFieldMapEntry] = []
+    used_paths: set[tuple[str, ...]] = set()
+    document = fitz.open(pdf_path)
+    try:
+        for page_index in range(document.page_count):
+            page = document.load_page(page_index)
+            raw_page: dict[str, Any] = page.get_text("dict")
+            for block in raw_page.get("blocks", []):
+                if not isinstance(block, dict) or block.get("type") != 0:
+                    continue
+                for line in block.get("lines", []):
+                    if not isinstance(line, dict):
+                        continue
+                    spans = [
+                        span for span in line.get("spans", []) if isinstance(span, dict)
+                    ]
+                    line_text = normalize_match_text(
+                        " ".join(str(span.get("text", "")) for span in spans)
+                    )
+                    if not line_text:
+                        continue
+                    bbox = line.get("bbox") or block.get("bbox")
+                    if bbox is None:
+                        continue
+                    x0, y0, x1, y1 = [float(value) for value in bbox]
+                    for path, label, candidate_text in candidates:
+                        path_key = tuple(path)
+                        if path_key in used_paths:
+                            continue
+                        if not candidate_matches_line(candidate_text, line_text):
+                            continue
+                        field_map.append(
+                            PdfFieldMapEntry(
+                                path=path,
+                                label=label,
+                                text=candidate_text,
+                                page=page_index + 1,
+                                x=x0,
+                                y=y0,
+                                width=max(0.0, x1 - x0),
+                                height=max(0.0, y1 - y0),
+                                page_width=float(page.rect.width),
+                                page_height=float(page.rect.height),
+                            )
+                        )
+                        used_paths.add(path_key)
+    finally:
+        document.close()
+
+    return field_map
+
+
 def render_web_request(
     request: RenderRequest,
     max_yaml_bytes: int,
     max_artifact_bytes: int,
-) -> list[RenderedArtifact]:
+) -> RenderWebResult:
     """Render requested artifacts from web payload.
 
     Why:
@@ -447,4 +642,10 @@ def render_web_request(
                 )
             )
 
-        return artifacts
+        field_map = (
+            build_pdf_field_map(pdf_path=pdf_path, yaml_text=request.main_yaml)
+            if request.include_field_map and pdf_path is not None
+            else []
+        )
+
+        return RenderWebResult(artifacts=artifacts, field_map=field_map)

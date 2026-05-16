@@ -8,14 +8,16 @@ previsualizar/descargar salidas generadas por el backend.
 Install dependencies and run the development server:
 
 ```bash
-npm run dev
+corepack enable
+pnpm install
+pnpm run dev
 ```
 
 By default the frontend expects the backend at `http://127.0.0.1:8000`.
 You can override it with:
 
 ```bash
-NEXT_PUBLIC_RENDERCV_API_BASE_URL=http://127.0.0.1:8000 npm run dev
+NEXT_PUBLIC_RENDERCV_API_BASE_URL=http://127.0.0.1:8000 pnpm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
@@ -29,8 +31,8 @@ contributors, licensed under the MIT License. See
 ## Scripts
 
 ```bash
-npm run lint
-npm run build
+pnpm run lint
+pnpm run build
 ```
 
 ## Deployment

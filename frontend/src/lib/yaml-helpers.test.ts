@@ -10,6 +10,7 @@ import {
   normalizeWrappedNormalSections,
   renameSection,
   replaceTextSectionEntries,
+  translateSectionTitlesForLanguage,
 } from './yaml-helpers';
 
 const yamlText = `cv:
@@ -110,6 +111,18 @@ describe('section helpers', () => {
     const sections = parsedSections(result);
 
     expect(sections.Skills).toBeUndefined();
+    expect(sections.Experience).toHaveLength(2);
+  });
+
+  it('translateSectionTitlesForLanguage renames known sections without changing entries', () => {
+    const result = translateSectionTitlesForLanguage(
+      yamlText.replace('    Projects:', '    Proyectos:'),
+      'english',
+    );
+    const sections = parsedSections(result);
+
+    expect(sections.Projects).toBeDefined();
+    expect(sections.Proyectos).toBeUndefined();
     expect(sections.Experience).toHaveLength(2);
   });
 });

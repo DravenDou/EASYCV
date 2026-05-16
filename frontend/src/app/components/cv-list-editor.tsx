@@ -12,11 +12,11 @@ import {
   Trash2,
 } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import { useState, type DragEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
 
 import { personalFields, socialFields } from '@/constants/fields';
 import { entryTemplates, getTemplateById } from '@/constants/templates';
-import type { EntryTemplateId, PersonalFieldKey, SocialNetworkKey } from '@/lib/types';
+import type { CvFieldPath, EntryTemplateId, PersonalFieldKey, SocialNetworkKey } from '@/lib/types';
 import {
   extractCvValue,
   extractSocialUsername,
@@ -128,9 +128,19 @@ function CompactTextArea({
 
 const singleBlockTextSections = new Set(['summary', 'resumen', 'profile', 'perfil']);
 
+function fieldPathToEntryKey(path: CvFieldPath | null): string | null {
+  if (!path || path.length < 4) return null;
+  if (path[0] !== 'cv' || path[1] !== 'sections') return null;
+  const sectionTitle = path[2];
+  const entryIndex = Number(path[3]);
+  if (!sectionTitle || !Number.isInteger(entryIndex)) return null;
+  return `${sectionTitle}::${entryIndex}`;
+}
+
 function isSingleBlockTextSection(sectionTitle: string, entries: unknown[]): boolean {
   return (
     singleBlockTextSections.has(sectionTitle.trim().toLowerCase()) &&
+    entries.length <= 1 &&
     entries.every((entry) => typeof entry === 'string')
   );
 }
@@ -186,7 +196,7 @@ function PersonalList({
   onFieldChange: (field: PersonalFieldKey, value: string) => void;
 }) {
   return (
-    <section className="rounded-[16px] border border-border bg-surface-secondary px-4 py-3">
+    <section className="rounded-[10px] border border-border bg-surface-secondary px-4 py-3">
       <div className="mb-2 flex items-center justify-between gap-3">
         <h3 className="text-sm font-semibold text-foreground">CV</h3>
         <Chip color="default" size="sm" variant="soft">
@@ -217,7 +227,7 @@ function SocialList({
   onSocialFieldChange: (network: SocialNetworkKey, value: string) => void;
 }) {
   return (
-    <section className="rounded-[16px] border border-border bg-surface-secondary px-4 py-3">
+    <section className="rounded-[10px] border border-border bg-surface-secondary px-4 py-3">
       <div className="mb-2 flex items-center justify-between gap-3">
         <h3 className="text-sm font-semibold text-foreground">Redes profesionales</h3>
         <Chip color="default" size="sm" variant="soft">
@@ -299,6 +309,7 @@ function EntryListEditor({
   isOpen,
   isDragging,
   isDragTarget,
+  isSelectedFromPdf,
   fallbackTemplateId,
   onDeleteEntry,
   onDuplicateEntry,
@@ -315,6 +326,7 @@ function EntryListEditor({
   isOpen: boolean;
   isDragging: boolean;
   isDragTarget: boolean;
+  isSelectedFromPdf: boolean;
   fallbackTemplateId: EntryTemplateId;
   onDeleteEntry: (sectionTitle: string, entryIndex: number) => void;
   onDuplicateEntry: (sectionTitle: string, entryIndex: number) => void;
@@ -334,14 +346,25 @@ function EntryListEditor({
   const template = getTemplateById(templateId);
   const Icon = template.icon;
   const shouldReduceMotion = useReducedMotion();
+  const entryRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!isSelectedFromPdf) return;
+    entryRef.current?.scrollIntoView({
+      behavior: shouldReduceMotion ? 'auto' : 'smooth',
+      block: 'nearest',
+    });
+  }, [isSelectedFromPdf, shouldReduceMotion]);
 
   return (
     <motion.section
       animate={shouldReduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
-      className="cv-entry-details rounded-[14px] border border-border bg-surface px-3 py-2"
+      className="cv-entry-details rounded-[10px] border border-border bg-surface px-3 py-2"
       data-drag-target={isDragTarget ? 'true' : 'false'}
       data-dragging={isDragging ? 'true' : 'false'}
       data-open={isOpen ? 'true' : 'false'}
+      data-pdf-selected={isSelectedFromPdf ? 'true' : 'false'}
+      ref={entryRef}
       initial={shouldReduceMotion ? false : { opacity: 0, y: 8 }}
       layout
       onDragOver={(event: DragEvent<HTMLElement>) => {
@@ -470,6 +493,7 @@ function EntryListEditor({
 
 function SectionList({
   yamlText,
+  selectedFieldPath,
   onInsertEntry,
   onDeleteEntry,
   onDuplicateEntry,
@@ -480,6 +504,7 @@ function SectionList({
   onSectionEntryChange,
 }: {
   yamlText: string;
+  selectedFieldPath: CvFieldPath | null;
   onInsertEntry: (sectionTitle: string, templateId: EntryTemplateId) => void;
   onDeleteEntry: (sectionTitle: string, entryIndex: number) => void;
   onDuplicateEntry: (sectionTitle: string, entryIndex: number) => void;
@@ -506,6 +531,7 @@ function SectionList({
     sectionTitle: string;
     entryIndex: number;
   } | null>(null);
+  const selectedEntryKey = fieldPathToEntryKey(selectedFieldPath);
 
   const entryKeyFor = (sectionTitle: string, entryIndex: number): string =>
     `${sectionTitle}::${entryIndex}`;
@@ -535,7 +561,7 @@ function SectionList({
 
   if (!data) {
     return (
-      <section className="rounded-[16px] border border-dashed border-danger/50 bg-danger/10 px-4 py-4">
+      <section className="rounded-[10px] border border-dashed border-danger/50 bg-danger/10 px-4 py-4">
         <h3 className="text-sm font-semibold text-danger">YAML no disponible</h3>
         <p className="mt-1 text-sm leading-6 text-muted">
           Corrige el YAML para volver a editar el CV en forma de lista.
@@ -545,7 +571,7 @@ function SectionList({
   }
 
   return (
-    <section className="rounded-[16px] border border-border bg-surface-secondary px-5 py-4">
+    <section className="rounded-[10px] border border-border bg-surface-secondary px-5 py-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold text-foreground">Secciones</h3>
@@ -583,7 +609,7 @@ function SectionList({
           const isUnifiedTextSection = isSingleBlockTextSection(sectionTitle, entries);
           return (
             <div
-              className="rounded-[16px] border border-border bg-background/40 p-4"
+              className="rounded-[10px] border border-border bg-background/40 p-4"
               key={sectionTitle}
             >
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-separator pb-2">
@@ -626,7 +652,7 @@ function SectionList({
               </div>
 
               {isUnifiedTextSection ? (
-                <div className="rounded-[14px] border border-border bg-surface px-3 py-2">
+                <div className="rounded-[10px] border border-border bg-surface px-3 py-2">
                   <ListRow label="Texto">
                     <CompactTextArea
                       ariaLabel={`${sectionTitle} texto`}
@@ -642,7 +668,13 @@ function SectionList({
                       entry={entry}
                       entryIndex={entryIndex}
                       fallbackTemplateId={templateId}
-                      isOpen={openEntries[entryKeyFor(sectionTitle, entryIndex)] ?? entryIndex === 0}
+                      isOpen={
+                        selectedEntryKey === entryKeyFor(sectionTitle, entryIndex) ||
+                        (openEntries[entryKeyFor(sectionTitle, entryIndex)] ?? entryIndex === 0)
+                      }
+                      isSelectedFromPdf={
+                        selectedEntryKey === entryKeyFor(sectionTitle, entryIndex)
+                      }
                       isDragTarget={
                         dragTarget?.sectionTitle === sectionTitle &&
                         dragTarget.entryIndex === entryIndex &&
@@ -685,7 +717,7 @@ function SectionList({
                   ))}
                 </div>
               ) : (
-                <p className="rounded-[12px] border border-dashed border-border px-3 py-3 text-sm text-muted">
+                <p className="rounded-[10px] border border-dashed border-border px-3 py-3 text-sm text-muted">
                   Esta sección está vacía.
                 </p>
               )}
@@ -705,7 +737,7 @@ function AddContentList({
   onInsertEntry: (sectionTitle: string, templateId: EntryTemplateId) => void;
 }) {
   return (
-    <section className="rounded-[16px] border border-border bg-surface-secondary px-4 py-3">
+    <section className="rounded-[10px] border border-border bg-surface-secondary px-4 py-3">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h3 className="text-sm font-semibold text-foreground">Agregar contenido</h3>
         <Chip color="default" size="sm" variant="soft">
@@ -740,6 +772,7 @@ function AddContentList({
 
 export function CvListEditor({
   yamlText,
+  selectedFieldPath,
   onPersonalFieldChange,
   onSocialFieldChange,
   onSectionEntryChange,
@@ -752,6 +785,7 @@ export function CvListEditor({
   onDeleteSection,
 }: {
   yamlText: string;
+  selectedFieldPath: CvFieldPath | null;
   onPersonalFieldChange: (field: PersonalFieldKey, value: string) => void;
   onSocialFieldChange: (network: SocialNetworkKey, value: string) => void;
   onSectionEntryChange: (
@@ -770,7 +804,7 @@ export function CvListEditor({
 }) {
   return (
     <div className="space-y-4 pb-4">
-      <div className="flex items-center gap-2 rounded-[16px] border border-border bg-surface-secondary px-4 py-3">
+      <div className="flex items-center gap-2 rounded-[10px] border border-border bg-surface-secondary px-4 py-3">
         <ListTree aria-hidden="true" className="size-4 shrink-0 text-accent" />
         <p className="text-sm font-semibold text-foreground">
           Edición rápida en lista
@@ -784,6 +818,7 @@ export function CvListEditor({
       <SocialList yamlText={yamlText} onSocialFieldChange={onSocialFieldChange} />
       <SectionList
         yamlText={yamlText}
+        selectedFieldPath={selectedFieldPath}
         onDeleteEntry={onDeleteEntry}
         onDeleteSection={onDeleteSection}
         onDuplicateEntry={onDuplicateEntry}

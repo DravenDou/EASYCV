@@ -506,6 +506,48 @@ export function deleteSection(yamlText: string, sectionTitle: string): string {
   });
 }
 
+const sectionTitleTranslations: Record<'english' | 'spanish', Record<string, string>> = {
+  english: {
+    certificaciones: 'Certifications',
+    educación: 'Education',
+    experiencia: 'Experience',
+    habilidades: 'Skills',
+    idiomas: 'Languages',
+    perfil: 'Profile',
+    proyectos: 'Projects',
+    publicaciones: 'Publications',
+    reconocimientos: 'Awards',
+    resumen: 'Summary',
+  },
+  spanish: {
+    awards: 'Reconocimientos',
+    certifications: 'Certificaciones',
+    education: 'Educación',
+    experience: 'Experiencia',
+    languages: 'Idiomas',
+    profile: 'Perfil',
+    projects: 'Proyectos',
+    publications: 'Publicaciones',
+    skills: 'Habilidades',
+    summary: 'Resumen',
+  },
+};
+
+export function translateSectionTitlesForLanguage(
+  yamlText: string,
+  language: 'english' | 'spanish',
+): string {
+  return updateSections(yamlText, (sections) => {
+    const translations = sectionTitleTranslations[language];
+    Object.keys(sections).forEach((title) => {
+      const nextTitle = translations[title.trim().toLowerCase()];
+      if (!nextTitle || nextTitle === title || nextTitle in sections) return;
+      sections[nextTitle] = sections[title];
+      delete sections[title];
+    });
+  });
+}
+
 // ─── Experience entries ───────────────────────────────────────────────────────
 
 export function extractExperienceEntries(yamlText: string): ExperienceEntryForm[] {

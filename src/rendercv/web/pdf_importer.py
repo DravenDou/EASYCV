@@ -1,9 +1,10 @@
 import io
 import re
 from dataclasses import dataclass
+from typing import Any
 
+import fitz
 import phonenumbers
-from pypdf import PdfReader
 from ruamel.yaml import YAML
 
 from rendercv.exception import RenderCVUserError
@@ -100,9 +101,13 @@ date_range_pattern = re.compile(
     re.I,
 )
 single_year_pattern = re.compile(r"\b(20\d{2}|19\d{2})\b")
-bullet_prefix_pattern = re.compile(r"^\s*(?:[-*•▪●‣·]|\\u2022)\s*")
+bullet_chars = "•▪●‣◦·∙⁃"
+bullet_prefix_pattern = re.compile(rf"^\s*(?:[-*{bullet_chars}]|\\u2022)\s*")
+embedded_bullet_pattern = re.compile(rf"\s+([{bullet_chars}])\s+")
 label_value_pattern = re.compile(r"^\s*([^:]{2,40}):\s*(.+)$")
 present_date_tokens = {"actualidad", "current", "now", "present", "presente"}
+bullet_marker = "• "
+layout_bullet_tokens = frozenset({"-", "*", "–", "—", "o", *bullet_chars})
 
 
 @dataclass(frozen=True)
@@ -110,11 +115,44 @@ class PdfImportResult:
     """Structured result of PDF text extraction and YAML conversion."""
 
     yaml: str
+    document: dict[str, object]
     extracted_text: str
     line_count: int
     warnings: list[str]
     detected_fields: list[str]
+    field_candidates: list[dict[str, object]]
+    pages: list[dict[str, object]]
     unrecognized_lines: list[str]
+
+
+@dataclass(frozen=True)
+class ExtractedPdfLayout:
+    """Selectable text and positioned blocks extracted from a PDF."""
+
+    text: str
+    pages: list[dict[str, object]]
+
+
+@dataclass(frozen=True)
+class PdfWord:
+    """One positioned word extracted from a PDF page."""
+
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    text: str
+
+
+@dataclass(frozen=True)
+class PdfLayoutLine:
+    """One reconstructed line with layout metadata."""
+
+    text: str
+    bbox: tuple[float, float, float, float]
+    font_size: float | None
+    is_bullet: bool
+    text_x0: float
 
 
 def normalize_line(line: str) -> str:
@@ -128,9 +166,88 @@ def normalize_line(line: str) -> str:
         .replace("\u200b", "")
         .replace("\uf0b7", "•")
         .replace("", "-")
+        .replace("∙", "•")
+        .replace("◦", "•")
+        .replace("⁃", "-")
     )
     normalized = bullet_prefix_pattern.sub("", normalized)
-    return re.sub(r"\s+", " ", normalized).strip(" \t\r\n•-–—")
+    return re.sub(r"\s+", " ", normalized).strip(f" \t\r\n{bullet_chars}-–—")
+
+
+def raw_line_starts_with_bullet(line: str) -> bool:
+    """Return true when a raw extracted line starts with a bullet marker."""
+    return bullet_prefix_pattern.match(line) is not None
+
+
+def line_has_bullet_marker(line: str) -> bool:
+    """Return true when a normalized line is tagged as an imported bullet."""
+    return line.startswith(bullet_marker)
+
+
+def strip_imported_bullet_marker(line: str) -> str:
+    """Remove the importer bullet marker from a line."""
+    return line.removeprefix(bullet_marker).strip()
+
+
+def normalize_extracted_line(line: str) -> str:
+    """Normalize one PDF/text line while preserving bullet semantics."""
+    normalized = normalize_line(line)
+    if raw_line_starts_with_bullet(line):
+        return f"{bullet_marker}{normalized}" if normalized else bullet_marker
+    return normalized
+
+
+def split_embedded_bullets(line: str) -> list[str]:
+    """Split a line containing multiple bullet items into editable items."""
+    normalized = (
+        line.replace("\uf0b7", "•")
+        .replace("∙", "•")
+        .replace("◦", "•")
+        .replace("⁃", "-")
+    )
+    bullet_count = len(re.findall(rf"[{bullet_chars}]", normalized))
+    if bullet_count > 1:
+        parts = [
+            part.strip()
+            for part in re.split(rf"[{bullet_chars}]\s*", normalized)
+            if part.strip()
+        ]
+        return [f"{bullet_marker}{part}" for part in parts]
+    if raw_line_starts_with_bullet(normalized):
+        return [normalized]
+    parts = [
+        part.strip()
+        for part in embedded_bullet_pattern.split(normalized)
+        if part.strip()
+    ]
+    if len(parts) <= 1:
+        return [normalized]
+
+    split_parts: list[str] = []
+    current_prefix = ""
+    for part in parts:
+        if len(part) == 1 and part in bullet_chars:
+            current_prefix = bullet_marker
+            continue
+        split_parts.append(f"{current_prefix}{part}")
+        current_prefix = ""
+    return split_parts if len(split_parts) > 1 else [normalized]
+
+
+def coalesce_bullet_lines(lines: list[str]) -> list[str]:
+    """Attach bullet-only extraction artifacts to the following text line."""
+    coalesced: list[str] = []
+    pending_bullet = False
+    for line in lines:
+        if line == bullet_marker:
+            pending_bullet = True
+            continue
+        if pending_bullet:
+            coalesced.append(line if line_has_bullet_marker(line) else f"{bullet_marker}{line}")
+            pending_bullet = False
+            continue
+        coalesced.append(line)
+    return coalesced
 
 
 def normalize_website(url: str) -> str:
@@ -141,48 +258,312 @@ def normalize_website(url: str) -> str:
     return value
 
 
-def extract_pdf_text(pdf_bytes: bytes) -> str:
-    """Extract plain text from uploaded PDF bytes.
+def bbox_to_block(
+    *,
+    text: str,
+    bbox: Any,
+    font_size: float | None,
+) -> dict[str, object]:
+    """Build a normalized API-safe PDF text block.
+
+    Args:
+        text: Text content.
+        bbox: PyMuPDF bounding box sequence.
+        font_size: Optional font size from the largest span.
+
+    Returns:
+        Dictionary with text and absolute page coordinates.
+    """
+    x0, y0, x1, y1 = [float(value) for value in bbox]
+    return {
+        "text": text,
+        "x": x0,
+        "y": y0,
+        "width": max(0.0, x1 - x0),
+        "height": max(0.0, y1 - y0),
+        "font_size": font_size,
+    }
+
+
+def word_tuple_to_pdf_word(word: tuple[Any, ...]) -> PdfWord | None:
+    """Convert a PyMuPDF word tuple to typed layout data."""
+    if len(word) < 5:
+        return None
+    text = str(word[4]).strip()
+    if not text:
+        return None
+    return PdfWord(
+        x0=float(word[0]),
+        y0=float(word[1]),
+        x1=float(word[2]),
+        y1=float(word[3]),
+        text=text,
+    )
+
+
+def words_share_visual_line(current_words: list[PdfWord], word: PdfWord) -> bool:
+    """Return true when a word belongs to an existing reconstructed line."""
+    if not current_words:
+        return False
+    current_y0 = min(current_word.y0 for current_word in current_words)
+    current_y1 = max(current_word.y1 for current_word in current_words)
+    current_center = (current_y0 + current_y1) / 2
+    word_center = (word.y0 + word.y1) / 2
+    current_height = max(1.0, current_y1 - current_y0)
+    word_height = max(1.0, word.y1 - word.y0)
+    tolerance = max(3.0, min(current_height, word_height) * 0.58)
+    return abs(current_center - word_center) <= tolerance
+
+
+def group_words_into_lines(words: list[PdfWord]) -> list[list[PdfWord]]:
+    """Group positioned words into visual lines."""
+    sorted_words = sorted(words, key=lambda word: ((word.y0 + word.y1) / 2, word.x0))
+    lines: list[list[PdfWord]] = []
+
+    for word in sorted_words:
+        if lines and words_share_visual_line(lines[-1], word):
+            lines[-1].append(word)
+            continue
+        lines.append([word])
+
+    return [sorted(line, key=lambda word: word.x0) for line in lines]
+
+
+def drawing_rect_from_path(path: dict[str, Any]) -> tuple[float, float, float, float] | None:
+    """Return a small drawing rectangle when it can be treated as a bullet."""
+    rect = path.get("rect")
+    if rect is None:
+        return None
+    x0, y0, x1, y1 = [float(value) for value in rect]
+    width = max(0.0, x1 - x0)
+    height = max(0.0, y1 - y0)
+    if width < 1.2 or height < 1.2 or width > 12 or height > 12:
+        return None
+    if max(width, height) / max(1.0, min(width, height)) > 1.8:
+        return None
+    has_fill = path.get("fill") is not None or path.get("type") in {"f", "fs"}
+    has_stroke = path.get("color") is not None
+    if not has_fill and not has_stroke:
+        return None
+    return x0, y0, x1, y1
+
+
+def collect_vector_bullet_rects(page: Any) -> list[tuple[float, float, float, float]]:
+    """Collect small vector marks that visually behave like bullets."""
+    bullet_rects: list[tuple[float, float, float, float]] = []
+    try:
+        drawings = page.get_drawings()
+    except Exception:
+        return bullet_rects
+
+    for path in drawings:
+        if not isinstance(path, dict):
+            continue
+        rect = drawing_rect_from_path(path)
+        if rect is not None:
+            bullet_rects.append(rect)
+    return bullet_rects
+
+
+def line_has_vector_bullet(
+    words: list[PdfWord],
+    vector_bullet_rects: list[tuple[float, float, float, float]],
+) -> bool:
+    """Return true when a small drawing sits before the line like a bullet."""
+    if not words:
+        return False
+    line_x0 = min(word.x0 for word in words)
+    line_y0 = min(word.y0 for word in words)
+    line_y1 = max(word.y1 for word in words)
+    line_center_y = (line_y0 + line_y1) / 2
+    for x0, y0, x1, y1 in vector_bullet_rects:
+        bullet_center_y = (y0 + y1) / 2
+        bullet_right_gap = line_x0 - x1
+        if (
+            2 <= bullet_right_gap <= 34
+            and line_y0 - 4 <= bullet_center_y <= line_y1 + 4
+            and abs(bullet_center_y - line_center_y) <= max(7.0, (line_y1 - line_y0) * 0.65)
+        ):
+            return True
+    return False
+
+
+def token_is_layout_bullet(token: str, words: list[PdfWord]) -> bool:
+    """Return true when the first token should be treated as a list bullet."""
+    normalized = token.strip().replace("\uf0b7", "•").replace("∙", "•").replace("◦", "•")
+    if normalized not in layout_bullet_tokens or len(words) < 2:
+        return False
+    first_word = words[0]
+    second_word = words[1]
+    marker_width = first_word.x1 - first_word.x0
+    marker_gap = second_word.x0 - first_word.x1
+    if normalized in bullet_chars:
+        return marker_width <= 14 and marker_gap <= 28
+    return marker_width <= 12 and 3 <= marker_gap <= 32
+
+
+def line_from_words(
+    words: list[PdfWord],
+    vector_bullet_rects: list[tuple[float, float, float, float]],
+) -> PdfLayoutLine | None:
+    """Build a layout line and preserve bullet semantics."""
+    if not words:
+        return None
+
+    sorted_words = sorted(words, key=lambda word: word.x0)
+    starts_with_text_bullet = token_is_layout_bullet(sorted_words[0].text, sorted_words)
+    starts_with_vector_bullet = line_has_vector_bullet(sorted_words, vector_bullet_rects)
+    content_words = sorted_words[1:] if starts_with_text_bullet else sorted_words
+    raw_text = " ".join(word.text for word in content_words)
+    text = normalize_line(raw_text)
+    if not text:
+        return None
+    is_bullet = starts_with_text_bullet or starts_with_vector_bullet
+    if is_bullet:
+        text = f"{bullet_marker}{text}"
+
+    x0 = min(word.x0 for word in sorted_words)
+    y0 = min(word.y0 for word in sorted_words)
+    x1 = max(word.x1 for word in sorted_words)
+    y1 = max(word.y1 for word in sorted_words)
+    font_size = max(word.y1 - word.y0 for word in sorted_words)
+    text_x0 = min(word.x0 for word in content_words)
+    return PdfLayoutLine(
+        text=text,
+        bbox=(x0, y0, x1, y1),
+        font_size=font_size,
+        is_bullet=is_bullet,
+        text_x0=text_x0,
+    )
+
+
+def should_merge_bullet_continuation(
+    previous_line: PdfLayoutLine,
+    current_line: PdfLayoutLine,
+) -> bool:
+    """Return true when current line visually continues the previous bullet."""
+    if not line_has_bullet_marker(previous_line.text) or line_has_bullet_marker(current_line.text):
+        return False
+    if looks_like_section_heading(current_line.text) or looks_like_boilerplate(current_line.text):
+        return False
+    previous_x = previous_line.text_x0
+    current_x = current_line.text_x0
+    vertical_gap = current_line.bbox[1] - previous_line.bbox[3]
+    return (
+        -2 <= current_x - previous_x <= 28
+        and -2 <= vertical_gap <= 16
+        and not looks_like_name(current_line.text)
+    )
+
+
+def merge_layout_line_text(
+    previous_line: PdfLayoutLine,
+    current_line: PdfLayoutLine,
+) -> PdfLayoutLine:
+    """Merge a wrapped continuation into a previous layout line."""
+    x0 = min(previous_line.bbox[0], current_line.bbox[0])
+    y0 = min(previous_line.bbox[1], current_line.bbox[1])
+    x1 = max(previous_line.bbox[2], current_line.bbox[2])
+    y1 = max(previous_line.bbox[3], current_line.bbox[3])
+    return PdfLayoutLine(
+        text=f"{previous_line.text} {current_line.text}",
+        bbox=(x0, y0, x1, y1),
+        font_size=previous_line.font_size,
+        is_bullet=previous_line.is_bullet,
+        text_x0=previous_line.text_x0,
+    )
+
+
+def coalesce_layout_lines(lines: list[PdfLayoutLine]) -> list[PdfLayoutLine]:
+    """Merge wrapped PDF lines that visually belong to the same bullet."""
+    coalesced: list[PdfLayoutLine] = []
+    for line in lines:
+        if coalesced and should_merge_bullet_continuation(coalesced[-1], line):
+            coalesced[-1] = merge_layout_line_text(coalesced[-1], line)
+            continue
+        coalesced.append(line)
+    return coalesced
+
+
+def extract_page_layout_lines(page: Any) -> list[PdfLayoutLine]:
+    """Extract page text using words, coordinates, and vector bullet detection."""
+    raw_words = page.get_text("words", sort=True)
+    words = [
+        word
+        for raw_word in raw_words
+        if (word := word_tuple_to_pdf_word(raw_word)) is not None
+    ]
+    vector_bullet_rects = collect_vector_bullet_rects(page)
+    lines = [
+        line
+        for word_line in group_words_into_lines(words)
+        if (line := line_from_words(word_line, vector_bullet_rects)) is not None
+    ]
+    return coalesce_layout_lines(lines)
+
+
+def extract_pdf_layout(pdf_bytes: bytes) -> ExtractedPdfLayout:
+    """Extract selectable text and layout blocks from uploaded PDF bytes.
 
     Args:
         pdf_bytes: Raw PDF bytes.
 
     Returns:
-        Extracted plain text.
+        Extracted text and page/block metadata.
 
     Raises:
         RenderCVUserError: If the file cannot be parsed or contains no text.
     """
     try:
-        reader = PdfReader(io.BytesIO(pdf_bytes))
+        document = fitz.open(stream=pdf_bytes, filetype="pdf")
     except Exception as error:
         raise RenderCVUserError(message="The uploaded PDF could not be read.") from error
 
-    if len(reader.pages) == 0:
+    if document.page_count == 0:
         raise RenderCVUserError(message="The uploaded PDF does not contain pages.")
 
     page_texts: list[str] = []
-    for page in reader.pages[:12]:
-        text = page.extract_text() or ""
-        if text.strip():
-            page_texts.append(text)
+    pages: list[dict[str, object]] = []
+    for page_index in range(min(document.page_count, 12)):
+        page = document.load_page(page_index)
+        page_blocks: list[dict[str, object]] = []
+        page_layout_lines = extract_page_layout_lines(page)
+        page_lines = [line.text for line in page_layout_lines]
+        for line in page_layout_lines:
+            page_blocks.append(
+                bbox_to_block(text=line.text, bbox=line.bbox, font_size=line.font_size)
+            )
+        if page_lines:
+            page_texts.append("\n".join(page_lines))
+        pages.append(
+            {
+                "page": page_index + 1,
+                "width": float(page.rect.width),
+                "height": float(page.rect.height),
+                "blocks": page_blocks,
+            }
+        )
+
+    document.close()
 
     extracted_text = "\n".join(page_texts).strip()
     if not extracted_text:
         raise RenderCVUserError(
-            message=(
-                "No selectable text was found in the PDF. Scanned image-only PDFs "
-                "cannot be converted without OCR."
-            )
+            message="Este PDF no contiene texto seleccionable; OCR no está habilitado."
         )
 
-    return extracted_text
+    return ExtractedPdfLayout(text=extracted_text, pages=pages)
 
 
 def normalized_lines_from_text(text: str) -> list[str]:
     """Return non-empty normalized lines from extracted text."""
-    lines = [normalize_line(line) for line in text.splitlines()]
-    return [line for line in lines if line]
+    lines: list[str] = []
+    for raw_line in text.splitlines():
+        for part in split_embedded_bullets(raw_line):
+            normalized = normalize_extracted_line(part)
+            if normalized:
+                lines.append(normalized)
+    return [line for line in coalesce_bullet_lines(lines) if line and line != bullet_marker]
 
 
 def find_first_match(pattern: re.Pattern[str], text: str) -> str:
@@ -227,13 +608,17 @@ def find_rendercv_safe_phone(text: str) -> str:
 
 def strip_contact_fragments(line: str) -> str:
     """Remove contact data fragments from a line."""
+    starts_with_bullet = line_has_bullet_marker(line)
     value = email_pattern.sub("", line)
     phone = find_phone(value)
     if phone:
         value = value.replace(phone, "")
     value = url_pattern.sub("", value)
     value = re.sub(r"\s*[|•·]\s*", " ", value)
-    return normalize_line(value)
+    cleaned = normalize_line(value)
+    if starts_with_bullet and cleaned:
+        return f"{bullet_marker}{cleaned}"
+    return cleaned
 
 
 def looks_like_section_heading(line: str) -> str | None:
@@ -443,10 +828,45 @@ def compact_highlights(lines: list[str]) -> list[str]:
     """Return cleaned highlights with noise removed."""
     highlights: list[str] = []
     for line in lines:
-        cleaned_line = normalize_line(line)
-        if cleaned_line and not looks_like_boilerplate(cleaned_line):
-            highlights.append(cleaned_line)
+        append_highlight_line(highlights, line)
     return highlights[:12]
+
+
+def bullet_texts(lines: list[str]) -> list[str]:
+    """Return clean imported bullet texts from a line collection."""
+    return [
+        normalize_line(strip_imported_bullet_marker(line))
+        for line in lines
+        if line_has_bullet_marker(line)
+        and normalize_line(strip_imported_bullet_marker(line))
+    ]
+
+
+def should_merge_wrapped_highlight_line(previous: str, current: str) -> bool:
+    """Return true when a PDF line is a continuation of the previous highlight."""
+    first_letter = next((char for char in current.strip() if char.isalpha()), "")
+    return (
+        bool(previous.strip())
+        and bool(current.strip())
+        and not previous.strip().endswith((".", "!", "?"))
+        and bool(first_letter)
+        and first_letter.islower()
+    )
+
+
+def append_highlight_line(highlights: list[str], line: str) -> None:
+    """Append a highlight while merging wrapped PDF continuation lines."""
+    cleaned = normalize_line(strip_imported_bullet_marker(line))
+    if not cleaned or looks_like_boilerplate(cleaned):
+        return
+    if (
+        highlights
+        and not line_has_bullet_marker(line)
+        and should_merge_wrapped_highlight_line(highlights[-1], cleaned)
+    ):
+        highlights[-1] = f"{highlights[-1]} {cleaned}"
+        return
+    highlights.append(cleaned)
 
 
 def build_experience_entries(lines: list[str]) -> list[dict[str, object]] | list[str]:
@@ -474,6 +894,10 @@ def build_experience_entries(lines: list[str]) -> list[dict[str, object]] | list
         highlights = []
 
     for line in lines:
+        if line_has_bullet_marker(line):
+            highlights.append(line)
+            continue
+
         label_value = split_label_value(line)
         if label_value is not None:
             label, value = label_value
@@ -551,6 +975,10 @@ def build_education_entries(lines: list[str]) -> list[dict[str, object]] | list[
     entry: dict[str, object] = {}
     highlights: list[str] = []
     for line in lines:
+        if line_has_bullet_marker(line):
+            highlights.append(line)
+            continue
+
         label_value = split_label_value(line)
         if label_value is not None:
             label, value = label_value
@@ -632,6 +1060,7 @@ def looks_like_normal_entry_title(line: str) -> bool:
     cleaned = line.strip()
     return (
         bool(cleaned)
+        and not line_has_bullet_marker(cleaned)
         and len(cleaned.split()) <= 8
         and not has_sentence_terminal_punctuation(cleaned)
         and not starts_with_lowercase_letter(cleaned)
@@ -666,6 +1095,10 @@ def build_normal_entries(lines: list[str]) -> list[dict[str, object]]:
         current_highlights = []
 
     for line in lines:
+        if line_has_bullet_marker(line):
+            current_highlights.append(line)
+            continue
+
         if not current_name:
             current_name = line
             continue
@@ -696,7 +1129,10 @@ def join_paragraph_lines(lines: list[str]) -> str:
 def build_section_entries(title: str, lines: list[str]) -> object:
     """Convert section text lines into RenderCV entry objects."""
     lowered = title.lower()
+    imported_bullets = bullet_texts(lines)
     if lowered in {"summary", "resumen", "profile", "perfil"}:
+        if imported_bullets:
+            return imported_bullets
         paragraph = join_paragraph_lines(lines)
         return [paragraph] if paragraph else []
     if lowered in {"experience", "experiencia"}:
@@ -709,8 +1145,20 @@ def build_section_entries(title: str, lines: list[str]) -> object:
         return build_one_line_entries(lines, "Languages")
     if lowered in {"projects", "proyectos", "research"}:
         return build_normal_entries(lines)
-    if lowered in {"awards", "honors", "certifications"}:
-        return [{"bullet": line} for line in lines[:24]]
+    if lowered in {
+        "awards",
+        "certifications",
+        "certificaciones",
+        "honors",
+        "reconocimientos",
+    }:
+        return [
+            {"bullet": normalize_line(strip_imported_bullet_marker(line))}
+            for line in lines[:24]
+            if normalize_line(strip_imported_bullet_marker(line))
+        ]
+    if imported_bullets and len(imported_bullets) >= max(2, len(lines) // 2):
+        return [{"bullet": line} for line in imported_bullets[:24]]
     return lines[:24]
 
 
@@ -892,6 +1340,110 @@ def collect_detected_fields(data: dict[str, object]) -> list[str]:
     return fields
 
 
+def collect_import_field_candidates(data: dict[str, object]) -> list[dict[str, object]]:
+    """Return structured field candidates inferred from imported PDF content.
+
+    Args:
+        data: RenderCV-compatible dictionary built from PDF text.
+
+    Returns:
+        Candidate fields with model paths and confidence scores.
+    """
+    cv = data.get("cv")
+    if not isinstance(cv, dict):
+        return []
+
+    candidates: list[dict[str, object]] = []
+    labels: dict[str, str] = {
+        "name": "Nombre",
+        "headline": "Titular",
+        "location": "Ubicación",
+        "email": "Correo",
+        "phone": "Teléfono",
+        "website": "Sitio web",
+    }
+    for field, label in labels.items():
+        value = cv.get(field)
+        if isinstance(value, str) and value.strip():
+            candidates.append(
+                {
+                    "path": ["cv", field],
+                    "label": label,
+                    "value": value,
+                    "confidence": 0.95,
+                    "source": "header",
+                }
+            )
+
+    social_networks = cv.get("social_networks")
+    if isinstance(social_networks, list):
+        for index, network in enumerate(social_networks):
+            if not isinstance(network, dict):
+                continue
+            username = network.get("username")
+            network_name = network.get("network")
+            if isinstance(username, str) and username.strip():
+                candidates.append(
+                    {
+                        "path": ["cv", "social_networks", str(index), "username"],
+                        "label": str(network_name or "Red social"),
+                        "value": username,
+                        "confidence": 0.9,
+                        "source": "contact",
+                    }
+                )
+
+    sections = cv.get("sections")
+    if isinstance(sections, dict):
+        for section_title, entries in sections.items():
+            if not isinstance(section_title, str) or not isinstance(entries, list):
+                continue
+            for entry_index, entry in enumerate(entries):
+                base_path = ["cv", "sections", section_title, str(entry_index)]
+                if isinstance(entry, str):
+                    candidates.append(
+                        {
+                            "path": base_path,
+                            "label": section_title,
+                            "value": entry,
+                            "confidence": 0.72,
+                            "source": "section",
+                        }
+                    )
+                    continue
+                if not isinstance(entry, dict):
+                    continue
+                for field, value in entry.items():
+                    if isinstance(value, str) and value.strip():
+                        candidates.append(
+                            {
+                                "path": [*base_path, str(field)],
+                                "label": f"{section_title} · {field}",
+                                "value": value,
+                                "confidence": 0.82,
+                                "source": "section",
+                            }
+                        )
+                    elif field == "highlights" and isinstance(value, list):
+                        for highlight_index, highlight in enumerate(value):
+                            if isinstance(highlight, str) and highlight.strip():
+                                candidates.append(
+                                    {
+                                        "path": [
+                                            *base_path,
+                                            "highlights",
+                                            str(highlight_index),
+                                        ],
+                                        "label": f"{section_title} · logro",
+                                        "value": highlight,
+                                        "confidence": 0.76,
+                                        "source": "section",
+                                    }
+                                )
+
+    return candidates
+
+
 def looks_like_unrecognized_section_heading(line: str, index: int) -> bool:
     """Return true for heading-shaped lines not mapped to known sections."""
     if index < 2:
@@ -976,12 +1528,13 @@ def collect_import_warnings(
 def build_import_metadata(
     data: dict[str, object],
     lines: list[str],
-) -> tuple[list[str], list[str], list[str]]:
+) -> tuple[list[str], list[str], list[dict[str, object]], list[str]]:
     """Build PDF import review metadata for the frontend."""
     detected_fields = collect_detected_fields(data)
+    field_candidates = collect_import_field_candidates(data)
     unrecognized_lines = collect_unrecognized_lines(lines)
     warnings = collect_import_warnings(data, lines, unrecognized_lines)
-    return warnings, detected_fields, unrecognized_lines
+    return warnings, detected_fields, field_candidates, unrecognized_lines
 
 
 def dump_yaml(data: dict[str, object]) -> str:
@@ -997,18 +1550,23 @@ def dump_yaml(data: dict[str, object]) -> str:
 
 def convert_pdf_to_yaml(pdf_bytes: bytes) -> PdfImportResult:
     """Extract text from a PDF and convert it into editable RenderCV YAML."""
-    extracted_text = extract_pdf_text(pdf_bytes)
-    lines = normalized_lines_from_text(extracted_text)
-    data = build_cv_dictionary(extracted_text)
-    warnings, detected_fields, unrecognized_lines = build_import_metadata(data, lines)
+    layout = extract_pdf_layout(pdf_bytes)
+    lines = normalized_lines_from_text(layout.text)
+    data = build_cv_dictionary(layout.text)
+    warnings, detected_fields, field_candidates, unrecognized_lines = (
+        build_import_metadata(data, lines)
+    )
     yaml = dump_yaml(data)
 
     return PdfImportResult(
         yaml=yaml,
+        document=data,
         extracted_text="\n".join(lines),
         line_count=len(lines),
         warnings=warnings,
         detected_fields=detected_fields,
+        field_candidates=field_candidates,
+        pages=layout.pages,
         unrecognized_lines=unrecognized_lines,
     )
 
@@ -1020,13 +1578,18 @@ def convert_text_to_yaml(text: str) -> PdfImportResult:
         raise RenderCVUserError(message="The PDF did not contain usable text.")
 
     data = build_cv_dictionary(text)
-    warnings, detected_fields, unrecognized_lines = build_import_metadata(data, lines)
+    warnings, detected_fields, field_candidates, unrecognized_lines = (
+        build_import_metadata(data, lines)
+    )
     yaml = dump_yaml(data)
     return PdfImportResult(
         yaml=yaml,
+        document=data,
         extracted_text="\n".join(lines),
         line_count=len(lines),
         warnings=warnings,
         detected_fields=detected_fields,
+        field_candidates=field_candidates,
+        pages=[],
         unrecognized_lines=unrecognized_lines,
     )

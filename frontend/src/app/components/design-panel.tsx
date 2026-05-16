@@ -37,11 +37,11 @@ function ThemeMiniPreview({
   return (
     <span
       aria-hidden="true"
-      className={`mb-3 block aspect-[1/1.28] overflow-hidden rounded-[10px] border bg-white p-2 shadow-sm transition ${
+      className={`mb-3 block aspect-[1/1.28] overflow-hidden rounded-[8px] border bg-white p-2 shadow-sm transition ${
         isSelected ? 'border-accent/60 ring-2 ring-accent/20' : 'border-slate-200'
       }`}
     >
-      <span className="block h-full rounded-[6px] bg-slate-50 p-2">
+        <span className="block h-full rounded-[6px] bg-slate-50 p-2">
         <span
           className={`mx-auto block h-2 rounded-full ${
             isTwoColumn ? 'w-12' : isFormal ? 'w-20' : 'w-16'
@@ -128,7 +128,7 @@ export function DesignPanel({
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {templateCards.map((template) => (
           <button
-            className={`rounded-[20px] border p-4 text-left transition duration-200 ${
+            className={`rounded-[10px] border p-4 text-left transition duration-200 ${
               selectedThemeId === template.id
                 ? 'border-accent bg-accent-soft text-accent'
                 : 'border-border bg-surface-secondary text-foreground hover:border-border-tertiary'
@@ -156,7 +156,7 @@ export function DesignPanel({
       </div>
 
       {/* Format selection */}
-      <div className="rounded-[20px] border border-border bg-surface-secondary p-4 space-y-3">
+      <div className="rounded-[10px] border border-border bg-surface-secondary p-4 space-y-3">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-semibold text-foreground">Formatos de salida</p>
@@ -171,7 +171,7 @@ export function DesignPanel({
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {(Object.keys(formatSelection) as Array<keyof RenderFormatSelection>).map((key) => (
             <label
-              className={`flex cursor-pointer items-center gap-3 rounded-[14px] border px-3 py-2 transition-colors ${
+              className={`flex cursor-pointer items-center gap-3 rounded-[10px] border px-3 py-2 transition-colors ${
                 formatSelection[key]
                   ? 'border-accent bg-accent-soft text-accent'
                   : 'border-border bg-surface text-muted hover:border-border-tertiary'
@@ -194,18 +194,18 @@ export function DesignPanel({
 
       {/* Idioma y salida info */}
       <div className="grid gap-3 sm:grid-cols-2">
-        <div className="rounded-[20px] border border-border bg-surface-secondary p-4">
+        <div className="rounded-[10px] border border-border bg-surface-secondary p-4">
           <p className="text-sm font-semibold text-foreground">Idioma</p>
           <p className="mt-2 text-sm text-muted">Español</p>
         </div>
-        <div className="rounded-[20px] border border-border bg-surface-secondary p-4">
+        <div className="rounded-[10px] border border-border bg-surface-secondary p-4">
           <p className="text-sm font-semibold text-foreground">Motor</p>
           <p className="mt-2 text-sm text-muted">Typst + RenderCV</p>
         </div>
       </div>
 
       {/* Custom design YAML editor */}
-      <div className="rounded-[20px] border border-border bg-surface-secondary overflow-hidden">
+      <div className="rounded-[10px] border border-border bg-surface-secondary overflow-hidden">
         <button
           className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-surface-tertiary/50 transition-colors"
           type="button"

@@ -14,28 +14,10 @@ import {
   Type,
 } from 'lucide-react';
 
-import type { CvLanguage, RenderStatus, ValidationStatus, RenderFormatSelection } from '@/lib/types';
+import type { CvLanguage, RenderFormatSelection } from '@/lib/types';
 import type { RenderedArtifact } from '@/lib/rendercv-api';
 import { artifactHref } from '@/lib/yaml-helpers';
-import { chipColorForRender, chipColorForValidation, statusLabelForRender, statusLabelForValidation } from '@/lib/yaml-helpers';
 import { ThemeToggle, ToolButton } from './ui-primitives';
-
-// ─── chip-like badge (no HeroUI to avoid SSR flicker) ────────────────────────
-
-function StatusBadge({ color, children }: { color: 'success' | 'warning' | 'danger' | 'accent' | 'default'; children: React.ReactNode }) {
-  const colorMap = {
-    success: 'bg-success/15 text-success border-success/30',
-    warning: 'bg-warning/15 text-warning border-warning/30',
-    danger: 'bg-danger/15 text-danger border-danger/30',
-    accent: 'bg-accent/15 text-accent border-accent/30',
-    default: 'bg-surface-secondary text-muted border-border',
-  };
-  return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${colorMap[color]}`}>
-      {children}
-    </span>
-  );
-}
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -65,15 +47,15 @@ function LanguageToggle({
   return (
     <button
       aria-label={`Idioma del CV: ${isEnglish ? 'Inglés' : 'Español'}. Clic para cambiar.`}
-      className="flex h-9 shrink-0 items-center gap-0 overflow-hidden rounded-full border border-border bg-surface-secondary text-xs font-bold transition-colors hover:border-border-tertiary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      className="flex h-8 shrink-0 items-center gap-0 overflow-hidden rounded-full border border-border bg-surface-secondary text-xs font-bold transition-colors hover:border-border-tertiary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       title={`CV en ${isEnglish ? 'inglés' : 'español'}. Clic para cambiar.`}
       type="button"
       onClick={() => onChange(isEnglish ? 'spanish' : 'english')}
     >
-      <span className={`flex h-full items-center px-3 py-1 transition-colors ${!isEnglish ? 'bg-accent text-accent-foreground' : 'text-muted'}`}>
+      <span className={`flex h-full items-center px-2.5 py-1 transition-colors ${!isEnglish ? 'bg-accent text-accent-foreground' : 'text-muted'}`}>
         ES
       </span>
-      <span className={`flex h-full items-center px-3 py-1 transition-colors ${isEnglish ? 'bg-accent text-accent-foreground' : 'text-muted'}`}>
+      <span className={`flex h-full items-center px-2.5 py-1 transition-colors ${isEnglish ? 'bg-accent text-accent-foreground' : 'text-muted'}`}>
         EN
       </span>
     </button>
@@ -141,7 +123,7 @@ function DownloadMenu({
       </Button>
 
       {open ? (
-        <div className="animate-in fade-in slide-in-from-top-1 absolute right-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-[16px] border border-border bg-surface shadow-xl duration-150">
+        <div className="animate-in fade-in slide-in-from-top-1 absolute right-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-[10px] border border-border bg-surface shadow-xl duration-150">
           {/* Download all */}
           <div className="border-b border-separator px-3 py-2">
             <button
@@ -221,8 +203,6 @@ function DownloadMenu({
 // ─── TopBar ───────────────────────────────────────────────────────────────────
 
 export function TopBar({
-  validationStatus,
-  renderStatus,
   artifacts,
   formatSelection,
   language,
@@ -237,8 +217,6 @@ export function TopBar({
   canRedo,
   isYamlEnabled,
 }: {
-  validationStatus: ValidationStatus;
-  renderStatus: RenderStatus;
   artifacts: RenderedArtifact[];
   formatSelection: RenderFormatSelection;
   language: CvLanguage;
@@ -254,23 +232,13 @@ export function TopBar({
   isYamlEnabled: boolean;
 }) {
   return (
-    <header className="sticky top-0 z-40 flex min-h-14 flex-col gap-2 border-b border-separator bg-background/95 px-3 py-2 backdrop-blur-md sm:flex-row sm:items-center sm:justify-between sm:px-4 sm:py-0 lg:pl-4">
-      {/* Left — status badges */}
+    <header className="sticky top-0 z-40 flex min-h-12 flex-col gap-2 border-b border-separator bg-background/95 px-3 py-2 backdrop-blur-md sm:flex-row sm:items-center sm:justify-between sm:px-4 sm:py-0 lg:pl-4">
       <div className="flex min-w-0 items-center justify-between gap-2 sm:justify-start">
-        <div className="grid size-9 shrink-0 place-items-center rounded-[12px] border border-accent/25 bg-accent-soft text-accent lg:hidden">
+        <div className="grid size-9 shrink-0 place-items-center rounded-[10px] border border-accent/25 bg-accent-soft text-accent lg:hidden">
           <FileText aria-hidden="true" className="size-5" />
-        </div>
-        <div className="hidden items-center gap-2 sm:flex">
-          <StatusBadge color={chipColorForValidation(validationStatus)}>
-            {statusLabelForValidation(validationStatus)}
-          </StatusBadge>
-          <StatusBadge color={chipColorForRender(renderStatus)}>
-            {statusLabelForRender(renderStatus)}
-          </StatusBadge>
         </div>
         <div className="min-w-0 sm:hidden">
           <p className="truncate text-sm font-semibold text-foreground">CV Studio</p>
-          <p className="truncate text-xs text-muted">{statusLabelForRender(renderStatus)}</p>
         </div>
         <div className="sm:hidden">
           <ThemeToggle />
@@ -286,7 +254,7 @@ export function TopBar({
         {/* Language toggle */}
         <LanguageToggle language={language} onChange={onLanguageChange} />
 
-        <label className="flex h-8 shrink-0 items-center gap-2 rounded-full border border-border bg-surface-secondary px-2 text-xs font-bold text-foreground">
+        <label className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface-secondary px-2 text-xs font-bold text-foreground">
           <Switch
             aria-label="Mostrar u ocultar editor YAML"
             isSelected={isYamlEnabled}

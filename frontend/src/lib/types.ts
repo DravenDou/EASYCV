@@ -7,7 +7,7 @@ import type { LucideIcon } from 'lucide-react';
 export type ValidationStatus = 'idle' | 'validating' | 'valid' | 'invalid' | 'error';
 export type RenderStatus = 'idle' | 'rendering' | 'ready' | 'error';
 export type ChipTone = 'default' | 'accent' | 'success' | 'warning' | 'danger';
-export type EditorTabId = 'lista' | 'yaml' | 'formulario' | 'diseno';
+export type EditorTabId = 'lista' | 'yaml' | 'diseno';
 export type PreviewFitMode = 'custom' | 'width' | 'page';
 export type PersonalFieldKey = 'name' | 'headline' | 'location' | 'email' | 'phone' | 'website';
 export type TemplateStatus = 'Activo' | 'Borrador' | 'Disponible' | 'Nuevo';
@@ -119,10 +119,64 @@ export type ImportedPdf = {
   size: number;
 };
 
+export type CvFieldPath = string[];
+
+export type CvDocument = {
+  cv?: Record<string, unknown>;
+  design?: Record<string, unknown>;
+  locale?: Record<string, unknown>;
+  settings?: Record<string, unknown>;
+};
+
+export type PdfFieldMapEntry = {
+  path: CvFieldPath;
+  label: string;
+  text: string;
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  page_width: number;
+  page_height: number;
+};
+
+export type ImportedPdfTextBlock = {
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  font_size: number | null;
+};
+
+export type ImportedPdfPage = {
+  page: number;
+  width: number;
+  height: number;
+  blocks: ImportedPdfTextBlock[];
+};
+
+export type ImportedFieldCandidate = {
+  path: CvFieldPath;
+  label: string;
+  value: string;
+  confidence: number;
+  source: string;
+};
+
+export type PdfEditorSelection = {
+  path: CvFieldPath;
+  label: string;
+  text: string;
+} | null;
+
 export type PdfImportReview = {
   fileName: string;
   warnings: string[];
   detectedFields: string[];
+  fieldCandidates: ImportedFieldCandidate[];
+  pages: ImportedPdfPage[];
   unrecognizedLines: string[];
 };
 

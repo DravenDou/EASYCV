@@ -1,6 +1,10 @@
+import fitz
+import pytest
+
+from rendercv.exception import RenderCVUserError
 from rendercv.schema.yaml_reader import read_yaml
 from rendercv.web.models import ValidateRequest
-from rendercv.web.pdf_importer import convert_text_to_yaml
+from rendercv.web.pdf_importer import convert_pdf_to_yaml, convert_text_to_yaml
 from rendercv.web.service import validate_web_request
 
 
@@ -36,6 +40,9 @@ Python, TypeScript, SQL
     assert "email" in result.detected_fields
     assert "phone" in result.detected_fields
     assert "section:Experience" in result.detected_fields
+    assert result.document["cv"]["name"] == "John Doe"
+    assert any(candidate["path"] == ["cv", "email"] for candidate in result.field_candidates)
+    assert result.pages == []
     assert result.warnings == []
     validate_web_request(ValidateRequest(main_yaml=result.yaml), max_yaml_bytes=500_000)
 
@@ -112,6 +119,10 @@ Reduced reporting time.
     assert "location" in result.detected_fields
     assert "social_networks" in result.detected_fields
     assert "section:Experience" in result.detected_fields
+    assert any(
+        candidate["path"] == ["cv", "sections", "Projects", "0", "name"]
+        for candidate in result.field_candidates
+    )
     validate_web_request(ValidateRequest(main_yaml=result.yaml), max_yaml_bytes=500_000)
 
 
@@ -134,3 +145,185 @@ Custom Label: Something useful
     assert "headline" in result.detected_fields
     assert "COMMUNITY WORK" in result.unrecognized_lines
     assert "Custom Label: Something useful" in result.unrecognized_lines
+
+
+def test_convert_text_to_yaml_preserves_bullets_as_separate_editable_entries() -> None:
+    text = """
+Jane Example
+Product Engineer
+jane@example.com
+Summary
+• Built internal platforms.
+• Improved release quality.
+Certifications
+• AWS Certified Developer
+• Scrum Master
+"""
+
+    result = convert_text_to_yaml(text)
+    data = read_yaml(result.yaml)
+
+    assert data["cv"]["sections"]["Summary"] == [
+        "Built internal platforms.",
+        "Improved release quality.",
+    ]
+    assert data["cv"]["sections"]["Certifications"] == [
+        {"bullet": "AWS Certified Developer"},
+        {"bullet": "Scrum Master"},
+    ]
+
+
+def test_convert_text_to_yaml_keeps_unbulleted_summary_as_one_editable_block() -> None:
+    text = """
+Ana Garcia
+Software Engineer
+ana@example.com
+Summary
+Software engineer building reliable web products
+with automation, backend services, and clear
+technical documentation for product teams.
+"""
+
+    result = convert_text_to_yaml(text)
+    data = read_yaml(result.yaml)
+
+    assert data["cv"]["sections"]["Summary"] == [
+        (
+            "Software engineer building reliable web products with automation, "
+            "backend services, and clear technical documentation for product teams."
+        )
+    ]
+
+
+def test_convert_text_to_yaml_keeps_project_bullets_inside_project() -> None:
+    text = """
+Ana Garcia
+Software Engineer
+ana@example.com
+Projects
+AI Agent Platform for WhatsApp Customer Support
+• Built a WhatsApp AI assistant for a Bolivian bus ticketing company to automate customer
+support and booking-related conversations.
+• Reduced manual handoffs for customer operations.
+Internal Dashboard
+• Reduced reporting time for weekly operational reviews.
+"""
+
+    result = convert_text_to_yaml(text)
+    data = read_yaml(result.yaml)
+
+    project_entries = data["cv"]["sections"]["Projects"]
+    assert len(project_entries) == 2
+    assert project_entries[0]["name"] == "AI Agent Platform for WhatsApp Customer Support"
+    assert project_entries[0]["highlights"] == [
+        (
+            "Built a WhatsApp AI assistant for a Bolivian bus ticketing company to "
+            "automate customer support and booking-related conversations."
+        ),
+        "Reduced manual handoffs for customer operations.",
+    ]
+    assert project_entries[1]["name"] == "Internal Dashboard"
+    assert project_entries[1]["highlights"] == [
+        "Reduced reporting time for weekly operational reviews."
+    ]
+
+
+def test_convert_pdf_to_yaml_extracts_selectable_text_with_layout() -> None:
+    document = fitz.open()
+    page = document.new_page(width=595, height=842)
+    page.insert_textbox(
+        fitz.Rect(72, 72, 520, 420),
+        """
+John Doe
+Senior Software Engineer
+john@example.com | +1 415 555 2671
+Experience
+Acme Corp
+Built internal tools and reduced deployment time.
+""".strip(),
+        fontsize=12,
+    )
+    pdf_bytes = document.write()
+    document.close()
+
+    result = convert_pdf_to_yaml(pdf_bytes)
+
+    assert result.document["cv"]["name"] == "John Doe"
+    assert result.pages[0]["page"] == 1
+    assert result.pages[0]["blocks"]
+    assert any(block["text"] == "John Doe" for block in result.pages[0]["blocks"])
+    assert any(candidate["path"] == ["cv", "name"] for candidate in result.field_candidates)
+
+
+def test_convert_pdf_to_yaml_detects_separated_dash_bullets_and_wrapped_lines() -> None:
+    document = fitz.open()
+    page = document.new_page(width=595, height=842)
+    page.insert_text((72, 72), "Ana Garcia", fontsize=14)
+    page.insert_text((72, 94), "Software Engineer", fontsize=11)
+    page.insert_text((72, 116), "ana@example.com", fontsize=10)
+    page.insert_text((72, 150), "Projects", fontsize=12)
+    page.insert_text((72, 174), "AI Platform", fontsize=11)
+    page.insert_text((86, 198), "-", fontsize=10)
+    page.insert_text(
+        (104, 198),
+        "Built a WhatsApp assistant for customer operations",
+        fontsize=10,
+    )
+    page.insert_text((104, 213), "with automation and reporting.", fontsize=10)
+    page.insert_text((86, 236), "-", fontsize=10)
+    page.insert_text((104, 236), "Reduced manual handoffs.", fontsize=10)
+    pdf_bytes = document.write()
+    document.close()
+
+    result = convert_pdf_to_yaml(pdf_bytes)
+    data = read_yaml(result.yaml)
+
+    project = data["cv"]["sections"]["Projects"][0]
+    assert project["name"] == "AI Platform"
+    assert project["highlights"] == [
+        (
+            "Built a WhatsApp assistant for customer operations "
+            "with automation and reporting."
+        ),
+        "Reduced manual handoffs.",
+    ]
+
+
+def test_convert_pdf_to_yaml_detects_vector_drawn_bullets() -> None:
+    document = fitz.open()
+    page = document.new_page(width=595, height=842)
+    page.insert_text((72, 72), "Ana Garcia", fontsize=14)
+    page.insert_text((72, 94), "Software Engineer", fontsize=11)
+    page.insert_text((72, 116), "ana@example.com", fontsize=10)
+    page.insert_text((72, 150), "Experience", fontsize=12)
+    page.insert_text((72, 174), "Aipraxia", fontsize=11)
+    page.insert_text((72, 190), "Full Stack Developer", fontsize=10)
+    page.draw_circle((91, 209), 2, color=(0, 0, 0), fill=(0, 0, 0))
+    page.insert_text((104, 213), "Built frontend and backend workflows.", fontsize=10)
+    page.draw_circle((91, 232), 2, color=(0, 0, 0), fill=(0, 0, 0))
+    page.insert_text((104, 236), "Improved deployment quality.", fontsize=10)
+    pdf_bytes = document.write()
+    document.close()
+
+    result = convert_pdf_to_yaml(pdf_bytes)
+    data = read_yaml(result.yaml)
+
+    experience = data["cv"]["sections"]["Experience"][0]
+    assert experience["company"] == "Aipraxia"
+    assert experience["position"] == "Full Stack Developer"
+    assert experience["highlights"] == [
+        "Built frontend and backend workflows.",
+        "Improved deployment quality.",
+    ]
+
+
+def test_convert_pdf_to_yaml_rejects_scanned_or_blank_pdf_without_ocr() -> None:
+    document = fitz.open()
+    document.new_page(width=595, height=842)
+    pdf_bytes = document.write()
+    document.close()
+
+    with pytest.raises(RenderCVUserError) as error:
+        convert_pdf_to_yaml(pdf_bytes)
+
+    assert "OCR no está habilitado" in error.value.message
